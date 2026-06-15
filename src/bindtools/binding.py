@@ -6,7 +6,7 @@ import datetime
 import math
 import os
 import re
-from multiprocessing import Pool, cpu_count
+from multiprocessing import Pool
 from contextlib import nullcontext
 
 import corner
@@ -17,12 +17,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import scipy as sp
-from numba import jit, njit
-from scipy.integrate import odeint
+from numba import jit
 
 #from optimparallel import minimize_parallel  # not required but can be useful if you want to do parallel LBGFS
 #from IPython.display import display, Markdown # lets us print tables of values tables using standard iPython
-from uncertainties import ufloat, umath
 
 from typing import Optional,List
 
