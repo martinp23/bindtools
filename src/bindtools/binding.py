@@ -1,7 +1,7 @@
 # mamba create -n binding -c conda-forge python jupyter tqdm ipython uncertainties lmfit scipy numpy emcee tqdm numba corner matplotlib numdifftools
 # test
 
-# Import necessary modules. 
+# Import necessary modules.
 import datetime
 import math
 import os
@@ -19,26 +19,28 @@ import pandas as pd
 import scipy as sp
 from numba import jit
 
-#from optimparallel import minimize_parallel  # not required but can be useful if you want to do parallel LBGFS
-#from IPython.display import display, Markdown # lets us print tables of values tables using standard iPython
+# from optimparallel import minimize_parallel  # not required but can be useful if you want to do parallel LBGFS
+# from IPython.display import display, Markdown # lets us print tables of values tables using standard iPython
 
-from typing import Optional,List
+from typing import Optional, List
 
 import logging
+
 logger = logging.getLogger(__name__)
-#import pickle as pkl
+# import pickle as pkl
+
 
 class EquilibriumError(Exception):
-    def __init__(self,message,val,params):
-      #  print("Equilibrium solver failed to converge.")
+    def __init__(self, message, val, params):
+        #  print("Equilibrium solver failed to converge.")
         self.val = val
-        #pkl.dump(params,open('params.pkl','wb'))
-    
-        #raise ValueError("End now")
+        # pkl.dump(params,open('params.pkl','wb'))
+
+        # raise ValueError("End now")
 
 
 # Set everything up - all functions for fitting
-# 
+#
 # #https://github.com/numba/numba/issues/1269#issuecomment-702665837
 # This solution enables us to apply the overloaded np.prod function along a single axis, see link above
 @jit(nopython=True)
@@ -57,8 +59,9 @@ def apply_along_axis_0(func1d, arr):
         _apply_along_axis_0(func1d, arr, out)
         return out
 
+
 # This solution enables us to apply the overloaded np.prod function along a single axis, see link above
-@jit(nopython=True,nogil=True)
+@jit(nopython=True, nogil=True)
 def _apply_along_axis_0(func1d, arr, out):
     """Like calling func1d(arr, axis=0, out=out). Require arr to be 2d or bigger."""
     ndim = arr.ndim
@@ -71,131 +74,148 @@ def _apply_along_axis_0(func1d, arr, out):
         for i, out_slice in enumerate(out):
             _apply_along_axis_0(func1d, arr[:, i], out_slice)
 
+
 # This function solves the equilibrium concentration problem based on equilibrium constants, adapted
 # from Maeder and co workers: https://doi.org/10.1016/S0922-3487(07)80006-2
-@jit(nopython=True,nogil=True,cache=True)
-def getConcs(eqMat,initComponentConc,logK):
+@jit(nopython=True, nogil=True, cache=True)
+def getConcs(eqMat, initComponentConc, logK):
     # now we give a vector containing the (log) equilibrium constants. Be careful
     # with sign because these constants are for formation of the complexes
-    # above from the "pure components". 
+    # above from the "pure components".
     K = 10.0**logK
     # make an initial guess. This doesn't need to be good - it should just
     # be nearly-equally bad for all parameters
     # the initial guess is for the concentrations of the *free components* only
-    guessCompConc = np.zeros((1,len(initComponentConc))) + np.mean(initComponentConc)
-    eqMat = eqMat.astype('float64') # fix bug in simple systems
+    guessCompConc = np.zeros((1, len(initComponentConc))) + np.mean(initComponentConc)
+    eqMat = eqMat.astype("float64")  # fix bug in simple systems
     # solve the equilibrium problem above using the Newton Raphson method
-    comp,spec = DoNR(eqMat,K,initComponentConc,guessCompConc)
+    comp, spec = DoNR(eqMat, K, initComponentConc, guessCompConc)
     return spec
 
-def getConcsScipy(eqMat,initComponentConc,logK,alg='L-BFGS-B'):
-    eqMat = eqMat.astype('float64')
+
+def getConcsScipy(eqMat, initComponentConc, logK, alg="L-BFGS-B"):
+    eqMat = eqMat.astype("float64")
     K = 10.0**logK
     guessCompConc = np.zeros(len(initComponentConc)) + np.mean(initComponentConc)
     guessLogCompConc = np.log(guessCompConc)
 
     bds = [(None, np.log(np.max(initComponentConc))) for _ in range(len(guessLogCompConc))]
     # jac=True says that specObj returns float,arr(n) where arr(n) is the Jacobian
-    res=sp.optimize.minimize(specObj,guessLogCompConc,jac=True,args=(initComponentConc,eqMat,K),method=alg,bounds=bds,tol=0,options={'gtol': 1e-20})
-    
-    compTotCalc,specConc = specCalc(np.exp(res.x),len(K),eqMat,K)
-    return specConc
-    
+    res = sp.optimize.minimize(
+        specObj,
+        guessLogCompConc,
+        jac=True,
+        args=(initComponentConc, eqMat, K),
+        method=alg,
+        bounds=bds,
+        tol=0,
+        options={"gtol": 1e-20},
+    )
 
-@jit(nopython=True,nogil=True,cache=True)
-def specCalc(conc,nspecies,eqMat,K):   # this function calculates the equilibrium concentrations of the species
+    compTotCalc, specConc = specCalc(np.exp(res.x), len(K), eqMat, K)
+    return specConc
+
+
+@jit(nopython=True, nogil=True, cache=True)
+def specCalc(conc, nspecies, eqMat, K):  # this function calculates the equilibrium concentrations of the species
     specmat = conc.repeat(nspecies).reshape((-1, nspecies))
-    eq3pt47 = apply_along_axis_0(np.prod,specmat**eqMat)
+    eq3pt47 = apply_along_axis_0(np.prod, specmat**eqMat)
     speciesConc = K * eq3pt47  # eq 3.48
 
     compTotCalc = eqMat @ speciesConc
-    return compTotCalc,speciesConc
+    return compTotCalc, speciesConc
 
-@jit(nopython=True,nogil=True,cache=True)
-def specJac(conc,initComponentConc,eqMat,K):    # this function calculates the Jacobian of the equilibrium problem
-    ncomp=np.shape(eqMat)[0]
-    nspecies=len(K)
-    _,speciesConc = specCalc(conc,nspecies,eqMat,K)  # calculate species concentrations  
-    J = _specJac(ncomp,eqMat,speciesConc) 
+
+@jit(nopython=True, nogil=True, cache=True)
+def specJac(conc, initComponentConc, eqMat, K):  # this function calculates the Jacobian of the equilibrium problem
+    ncomp = np.shape(eqMat)[0]
+    nspecies = len(K)
+    _, speciesConc = specCalc(conc, nspecies, eqMat, K)  # calculate species concentrations
+    J = _specJac(ncomp, eqMat, speciesConc)
     return J
 
-@jit(nopython=True,nogil=True,cache=True)
-def _specJac(ncomp,eqMat,speciesConc):    # this function calculates the Jacobian of the equilibrium problem
 
-    J = np.zeros((ncomp,ncomp))
+@jit(nopython=True, nogil=True, cache=True)
+def _specJac(ncomp, eqMat, speciesConc):  # this function calculates the Jacobian of the equilibrium problem
+
+    J = np.zeros((ncomp, ncomp))
     # calculate Jacobian
     for ii in range(ncomp):
         for jj in range(ii, ncomp):
             J[ii, jj] = np.sum(eqMat[ii, :] * eqMat[jj, :] * speciesConc)
             if ii != jj:
                 J[jj, ii] = J[ii, jj]
-    
+
     return J
 
-def specObj(logConc,initComponentConc,eqMat,K):
+
+def specObj(logConc, initComponentConc, eqMat, K):
     conc = np.exp(logConc)
     nspecies = len(K)
-    compTotCalc,specConc = specCalc(conc,nspecies,eqMat,K)
-    
+    compTotCalc, specConc = specCalc(conc, nspecies, eqMat, K)
+
     # Calculate the objective function (sum of squared residuals)
     residual = initComponentConc - compTotCalc
     obj = np.sum(residual**2)
-    
+
     # Calculate the Jacobian of the objective function with respect to logConc
-    J = specJac(conc,initComponentConc,eqMat,K)
+    J = specJac(conc, initComponentConc, eqMat, K)
     # Jacobian of objective function: d/dc_j sum((target - calculated)^2) = -2 * sum_i J_ij * (target_i - calculated_i)
     grad = -2.0 * J @ residual
-    
+
     return obj, grad
 
 
 # This function implements the Newton Raphson method for solving the equilibrium problem
 # following: https://doi.org/10.1016/S0922-3487(07)80006-2
-#@jit("Tuple((f8[:],f8[:]))(f8[:,:],f8[:],f8[:],f8[:])",nopython=True,nogil=True)
-@jit(nopython=True,nogil=True,cache=True)
-def DoNR(eqMat,K,initComponentConc,guessCompConc):
+# @jit("Tuple((f8[:],f8[:]))(f8[:,:],f8[:],f8[:],f8[:])",nopython=True,nogil=True)
+@jit(nopython=True, nogil=True, cache=True)
+def DoNR(eqMat, K, initComponentConc, guessCompConc):
     nspecies = len(K)
     ncomp = len(initComponentConc)
-    
+
     initComponentConc = np.copy(initComponentConc)
-    initComponentConc[initComponentConc<=0] = 1e-20 # avoids numerical errors. Changed to <=0 rather than == 0 because sometimes small negative errors appear which makes
-                                                    # the optimisation impossible
-    
+    initComponentConc[initComponentConc <= 0] = (
+        1e-20  # avoids numerical errors. Changed to <=0 rather than == 0 because sometimes small negative errors appear which makes
+    )
+    # the optimisation impossible
+
     conc = np.copy(guessCompConc)
-    for iter in range(0,600):
+    for iter in range(0, 600):
+        compTotCalc, speciesConc = specCalc(conc, nspecies, eqMat, K)
 
-        compTotCalc,speciesConc = specCalc(conc,nspecies,eqMat,K)
-
-        # if our computed component concentrations are close 
+        # if our computed component concentrations are close
         # enough to the true concentrations, we can stop
         deltaComp = initComponentConc - compTotCalc
         if np.all(np.abs(deltaComp) < 1e-15):
-            return compTotCalc,speciesConc
+            return compTotCalc, speciesConc
 
         # otherwise calculate the Jacobian
-        J = _specJac(ncomp,eqMat,speciesConc)
+        J = _specJac(ncomp, eqMat, speciesConc)
 
         # estimate the change in component concentrations
-        deltaConc = np.linalg.lstsq(J, deltaComp)[0].T * conc # , rcond=None
+        deltaConc = np.linalg.lstsq(J, deltaComp)[0].T * conc  # , rcond=None
 
         # if the change in component concentrations is too small, we are stuck
-        if(np.any(deltaConc == 0) and np.max(np.abs(deltaConc)) < 1e-15):
+        if np.any(deltaConc == 0) and np.max(np.abs(deltaConc)) < 1e-15:
             # we are not going anywhere, let's start again with a subtly different initial guess
-            conc = guessCompConc+np.random.randn(len(guessCompConc))*1e-10
+            conc = guessCompConc + np.random.randn(len(guessCompConc)) * 1e-10
         else:
             conc += deltaConc
 
-        if (iter+1) % 200 == 0:
+        if (iter + 1) % 200 == 0:
             # assume we are stuck, try  new guess
-            conc = guessCompConc+np.random.randn(len(guessCompConc))*1e-10
+            conc = guessCompConc + np.random.randn(len(guessCompConc)) * 1e-10
 
         while np.any(conc <= 0):
-            deltaConc = deltaConc/2
+            deltaConc = deltaConc / 2
             conc -= deltaConc
-            if np.all(np.abs(deltaConc)<1e-19):
+            if np.all(np.abs(deltaConc) < 1e-19):
                 break
 
-    raise EquilibriumError("Failed to converge in equilibrium solver doNR",speciesConc,(eqMat,K,initComponentConc,guessCompConc))
+    raise EquilibriumError(
+        "Failed to converge in equilibrium solver doNR", speciesConc, (eqMat, K, initComponentConc, guessCompConc)
+    )
 
 
 def _analytical_obs_param_token(col_name: str) -> str:
@@ -213,7 +233,7 @@ def _best_real_root(coeffs: np.ndarray, lower: float, upper: float, score_fn) ->
     if len(nz) == 0:
         return float(lower)
 
-    trimmed = coeffs[nz[0]:]
+    trimmed = coeffs[nz[0] :]
     roots = np.roots(trimmed)
     real_roots = [float(r.real) for r in roots if abs(r.imag) < 1e-10]
     if not real_roots:
@@ -230,12 +250,18 @@ def _solve_row_11(h_tot: float, g_tot: float, beta11: float) -> tuple[float, flo
         raise ValueError("Binding constant (in natural units) cannot be negative")
     if h_tot < 0 or g_tot < 0:
         raise ValueError("Total concentrations must be non-negative")
-    if h_tot ==0 or g_tot == 0:
-        return max(h_tot, 0.0), max(g_tot, 0.0), 0.0 # if either total concentration is zero, then there can be no complex
+    if h_tot == 0 or g_tot == 0:
+        return (
+            max(h_tot, 0.0),
+            max(g_tot, 0.0),
+            0.0,
+        )  # if either total concentration is zero, then there can be no complex
 
     first_term = h_tot + g_tot + 1.0 / max(beta11, 1e-300)
     hg = 0.5 * (first_term - math.sqrt(max(first_term**2 - 4.0 * h_tot * g_tot, 0.0)))
-    hg = float(np.clip(hg, 0.0, min(h_tot, g_tot))) # [HG] cannot be negative or greater than either total concentration
+    hg = float(
+        np.clip(hg, 0.0, min(h_tot, g_tot))
+    )  # [HG] cannot be negative or greater than either total concentration
     return h_tot - hg, g_tot - hg, hg
 
 
@@ -313,7 +339,6 @@ def calc_analytical_speciation(
     n_comp: int,
     complex_indices: list[int],
 ) -> tuple[np.ndarray, bool]:
-    
 
     n_rows = int(np.shape(comp_concs)[0])
     n_species = int(np.shape(eq_mat)[1])
@@ -361,9 +386,7 @@ def calc_analytical_speciation(
     return spec_calc, error
 
 
-def _analytical_param_value(
-    values: np.ndarray, name_to_idx: dict[str, int], param_name: str
-) -> float:
+def _analytical_param_value(values: np.ndarray, name_to_idx: dict[str, int], param_name: str) -> float:
     idx = name_to_idx.get(param_name)
     if idx is None or idx >= len(values):
         return 0.0
@@ -380,7 +403,6 @@ def calc_analytical_observables(
     shift_param_names: list[str],
     obs_param_map: list[list[str]],
 ) -> np.ndarray:
-    
 
     n_obs = len(obs_components)
     out = np.zeros((spec_calc.shape[0], n_obs), dtype=float)
@@ -520,94 +542,97 @@ def fitfun_analytical_fast_exchange(params, fcn_opts):
     return -1
 
 
-def fitfun(params,fcn_opts):#,eqMat,specConcs,startShifts=None,sigma=1,ret='residual'):
+def fitfun(params, fcn_opts):  # ,eqMat,specConcs,startShifts=None,sigma=1,ret='residual'):
 
-# fcn_opts = {'compConcs': compConcs,
-#             'eqMat': eqMat,
-#             'optTarget': 'obs',    # or concs
-#             'concsExpt': None,
-#             # 'obsExpt': integrals,
-#             # 'concToObs': concToObs,
-#             'sigma': 1,
-#             'ret': 'residual'}
+    # fcn_opts = {'compConcs': compConcs,
+    #             'eqMat': eqMat,
+    #             'optTarget': 'obs',    # or concs
+    #             'concsExpt': None,
+    #             # 'obsExpt': integrals,
+    #             # 'concToObs': concToObs,
+    #             'sigma': 1,
+    #             'ret': 'residual'}
 
-    if fcn_opts.get('analytical_fast_exchange') is True and fcn_opts.get('analytical_topology') in ('1:1', '1:2', '2:1'):
+    if fcn_opts.get("analytical_fast_exchange") is True and fcn_opts.get("analytical_topology") in (
+        "1:1",
+        "1:2",
+        "2:1",
+    ):
         return fitfun_analytical_fast_exchange(params, fcn_opts)
 
-    if isinstance(params,lmfit.parameter.Parameters):
+    if isinstance(params, lmfit.parameter.Parameters):
         parvals = list(params.valuesdict().values())
-    else: 
+    else:
         parvals = params
 
-    bindingParams = np.array([*parvals][:fcn_opts['nK']],dtype=np.float64)
+    bindingParams = np.array([*parvals][: fcn_opts["nK"]], dtype=np.float64)
     error = False
     specCalc = []
-    for row in fcn_opts['compConcs']:
+    for row in fcn_opts["compConcs"]:
         try:
-            yEq = getConcs(fcn_opts['eqMat'],row,bindingParams)
+            yEq = getConcs(fcn_opts["eqMat"], row, bindingParams)
         except EquilibriumError as e:
             yEq = e.val
             error = True
-        specCalc.append(yEq)#yEq[4:])
+        specCalc.append(yEq)  # yEq[4:])
     specCalc = np.array(specCalc)
     # except EquilibriumError as e:
     #     if fcn_opts['ret'] == 'residual':
     #         return 1000
-        # if fnc_opts
-        # specCalc = np.zeros((len(fcn_opts['compConcs']),len(e.val)))+1e-50
+    # if fnc_opts
+    # specCalc = np.zeros((len(fcn_opts['compConcs']),len(e.val)))+1e-50
     #     print("Equilibrium solver failed to converge. Returning zeros.")
 
-
-    if fcn_opts['optTarget'] == 'concs':
-        if fcn_opts['ret'] == 'residual':
+    if fcn_opts["optTarget"] == "concs":
+        if fcn_opts["ret"] == "residual":
             # normalize residuals
-            res= (fcn_opts['exptData']-specCalc)
-            res = res/fcn_opts['sigma']
-            if error is True: # penalty if there is an error in doNR
-                res = res*10
-                if fcn_opts['mcmc'] is True:
+            res = fcn_opts["exptData"] - specCalc
+            res = res / fcn_opts["sigma"]
+            if error is True:  # penalty if there is an error in doNR
+                res = res * 10
+                if fcn_opts["mcmc"] is True:
                     return np.nan
             return res
-        elif fcn_opts['ret'] == 'concs':
+        elif fcn_opts["ret"] == "concs":
             return specCalc
-        
-    elif fcn_opts['optTarget'] == 'obs':
-        shiftParams =    np.array([*parvals][fcn_opts['nK']:],dtype=np.float64)
-        paramNames = fcn_opts['paramNames'][fcn_opts['nK']:]
+
+    elif fcn_opts["optTarget"] == "obs":
+        shiftParams = np.array([*parvals][fcn_opts["nK"] :], dtype=np.float64)
+        paramNames = fcn_opts["paramNames"][fcn_opts["nK"] :]
         obsCalc = concToObservable(
             specCalc,
-            fcn_opts['specToInteg'],
-            fcn_opts['specToDd'],
+            fcn_opts["specToInteg"],
+            fcn_opts["specToDd"],
             shiftParams,
             paramNames,
-            specToLinear=fcn_opts.get('specToLinear'),
+            specToLinear=fcn_opts.get("specToLinear"),
         )
 
-        if fcn_opts['ret'] == 'residual':
+        if fcn_opts["ret"] == "residual":
             # normalize residuals
-            res= (fcn_opts['exptData'] - obsCalc)  # function needs to know if it's working in conc or observables
-            res = res/fcn_opts['sigma']
-            
-            # Set positions of nan values in exptData to 0 in res
-            nan_mask = np.isnan(fcn_opts['exptData'])
-            res[nan_mask] = 0
-            res[fcn_opts['exptData']==np.nan] = 0
+            res = fcn_opts["exptData"] - obsCalc  # function needs to know if it's working in conc or observables
+            res = res / fcn_opts["sigma"]
 
-            if error is True: # penalty if there is an error in doNR
-                res = res*10
-                if fcn_opts['mcmc'] is True:
+            # Set positions of nan values in exptData to 0 in res
+            nan_mask = np.isnan(fcn_opts["exptData"])
+            res[nan_mask] = 0
+            res[fcn_opts["exptData"] == np.nan] = 0
+
+            if error is True:  # penalty if there is an error in doNR
+                res = res * 10
+                if fcn_opts["mcmc"] is True:
                     return np.nan
-            if fcn_opts['mcmc'] is True:
-                # remove nan values which tend to come from where we 
-                # are unable to calculate a chemical shift due to insufficient 
+            if fcn_opts["mcmc"] is True:
+                # remove nan values which tend to come from where we
+                # are unable to calculate a chemical shift due to insufficient
                 # data (i.e. zeros in specToDd)
-                if fcn_opts['specToDd'] is not None:
-                    nShift = np.shape(fcn_opts['specToDd'])[1]
-                    res[:,-nShift:] = np.nan_to_num(res[:,-nShift:])
-             # res[np.isnan(res)] = 1000 # set a huge residual where we have NaNs (which arise from normalizing the chemical shift)
-           # print(res)
+                if fcn_opts["specToDd"] is not None:
+                    nShift = np.shape(fcn_opts["specToDd"])[1]
+                    res[:, -nShift:] = np.nan_to_num(res[:, -nShift:])
+            # res[np.isnan(res)] = 1000 # set a huge residual where we have NaNs (which arise from normalizing the chemical shift)
+            # print(res)
             return res
-        elif fcn_opts['ret'] == 'concs':
+        elif fcn_opts["ret"] == "concs":
             return obsCalc
 
     else:
@@ -615,39 +640,42 @@ def fitfun(params,fcn_opts):#,eqMat,specConcs,startShifts=None,sigma=1,ret='resi
         return -1
 
 
-def deltaToConc(deltas,mapping,startShifts,endShifts,isHost,isHG):
+def deltaToConc(deltas, mapping, startShifts, endShifts, isHost, isHG):
     # deltas is a vector of chemical shifts
     pass
 
-def concToDelta(concs,specToDd,shiftParams,paramNames):
-    mlen,nlen = np.shape(specToDd)
-    #nlen = np.shape(specToDd)[1]
+
+def concToDelta(concs, specToDd, shiftParams, paramNames):
+    mlen, nlen = np.shape(specToDd)
+    # nlen = np.shape(specToDd)[1]
     specToDdTrial = np.copy(specToDd)
 
     # here we replace tuples in the original mapping with parameter values from the fitting engine
     # this could be done a lot more elegantly/cleanly TODO
     for ii in range(mlen):
         for ij in range(nlen):
-            if isinstance(specToDdTrial[ii,ij], tuple):
-                specToDdTrial[ii,ij] = shiftParams[paramNames.index('shift_{}_{}'.format(ii,ij))]
+            if isinstance(specToDdTrial[ii, ij], tuple):
+                specToDdTrial[ii, ij] = shiftParams[paramNames.index("shift_{}_{}".format(ii, ij))]
 
-            elif isinstance(specToDdTrial[ii,ij], lmfit.Parameter):
-                specToDdTrial[ii,ij] = shiftParams[paramNames.index(specToDdTrial[ii,ij].name)]
+            elif isinstance(specToDdTrial[ii, ij], lmfit.Parameter):
+                specToDdTrial[ii, ij] = shiftParams[paramNames.index(specToDdTrial[ii, ij].name)]
     specToDdTrial = specToDdTrial.astype(np.float64)
 
     # normalize concs to mol fractions
-    truthMat = np.array(specToDdTrial,dtype=bool)
+    truthMat = np.array(specToDdTrial, dtype=bool)
     shiftCalc = []
     for cc in concs:
-        tt = (truthMat.T*cc).T
+        tt = (truthMat.T * cc).T
         moleFracs = tt / tt.sum(axis=0)
-        sc = (moleFracs*specToDdTrial).sum(axis=0)
+        sc = (moleFracs * specToDdTrial).sum(axis=0)
         shiftCalc.append(sc)
 
     return shiftCalc
 
 
-def concToLinearObs(concs: np.ndarray, specToLinear: np.ndarray, shiftParams: np.ndarray, paramNames: list) -> np.ndarray:
+def concToLinearObs(
+    concs: np.ndarray, specToLinear: np.ndarray, shiftParams: np.ndarray, paramNames: list
+) -> np.ndarray:
     """Compute concentration-weighted linear observables (Beer-Lambert / fluorescence).
 
     obs_i = sum_j ( coeff_ij * [species_j] )  — no mole-fraction normalisation.
@@ -703,8 +731,6 @@ def concToObservable(specConcs, specToInteg, specToDd, shiftParams, paramNames, 
         return np.zeros((np.shape(specConcs)[0], 0))
 
 
-
-
 # def logprior(par):
 #     if par[2]<par[1] or par[1]<par[0]:
 #         return -np.inf
@@ -721,10 +747,10 @@ def concToObservable(specConcs, specToInteg, specToDd, shiftParams, paramNames, 
 # def fitfun_mc(params,compConcs,eqMat,specConcs):
 #     if type(params) == lmfit.parameter.Parameters:
 #         parvals = list(params.valuesdict().values())
-#     else: 
+#     else:
 #         parvals = params
-    
-    
+
+
 #     params = parvals[:-1]#.valuesdict().values()
 #     lnsigma = parvals[-1]
 #     params = [*params][0:len(eqMat)]
@@ -746,7 +772,7 @@ def concToObservable(specConcs, specToInteg, specToDd, shiftParams, paramNames, 
 #     specCalc = np.array(specCalc)
 
 #     return (-0.5*np.sum(
-#                         ((specConcs-specCalc) / np.exp(lnsigma))**2 
+#                         ((specConcs-specCalc) / np.exp(lnsigma))**2
 #                         + np.log(2*np.pi) + 2*lnsigma))
 
 
@@ -755,8 +781,20 @@ def concToObservable(specConcs, specToInteg, specToDd, shiftParams, paramNames, 
 
 #     return sum((specConcs.flatten() - res)**2)
 
-class bindingModel():
-    def __init__(self,eqMat,compNames,speciesList,specToInteg=None,specToDd=None,colToComp=None,obsList=None,rawData=None,compConcs=None):
+
+class bindingModel:
+    def __init__(
+        self,
+        eqMat,
+        compNames,
+        speciesList,
+        specToInteg=None,
+        specToDd=None,
+        colToComp=None,
+        obsList=None,
+        rawData=None,
+        compConcs=None,
+    ):
         self.plist = speciesList
         self.compNames = compNames
         self.eqMat = eqMat
@@ -764,7 +802,7 @@ class bindingModel():
         self._compConcs = None
         self.nConcs = None
         self.nComp = None
-        self.obsList=obsList
+        self.obsList = obsList
         self.comment = None
 
         # if compConcs is not None:
@@ -778,7 +816,7 @@ class bindingModel():
             self.colToSpec = specToInteg
         else:
             self.colToSpec = None
-        
+
         self.rawData = rawData
 
         if compConcs is not None:
@@ -786,7 +824,7 @@ class bindingModel():
             self.nComp = np.shape(compConcs)[1]
             self.nConcs = np.shape(compConcs)[0]
 
-        self.concUnits = None # mM #TODO
+        self.concUnits = None  # mM #TODO
         self.specToDd = specToDd
         self.specToLinear: Optional[np.ndarray] = None  # (n_species, n_obs) object array for UV-vis / fluorescence
         self.analytical_fast_exchange: bool = False
@@ -797,26 +835,25 @@ class bindingModel():
         self.analytical_obs_param_map: list[list[str]] = []
         self.analytical_linear_obs_columns: list[str] = []
         self.analytical_linear_obs_param_map: list[list] = []  # per-obs list of param names (or None) in species order
-        
+
         self.params = lmfit.Parameters()
-        self.mini=None
+        self.mini = None
         self.miniResult = None
-        self.fcn_opts=None
+        self.fcn_opts = None
         self.colTypes: Optional[List[ObsType]] = None
 
+    def _addParam(self, name, init=3, min=0, max=14, vary=True):
+        self.params[name] = lmfit.Parameter(name, init, min=min, max=max, vary=vary)
 
-    def _addParam(self,name,init=3,min=0,max=14,vary=True):
-        self.params[name] = lmfit.Parameter(name,init,min=min,max=max,vary=vary)
-
-    def _addExistingParam(self,param):
+    def _addExistingParam(self, param):
         self.params[param.name] = param
-        
+
     @property
     def colToComp(self):
         return self._colToComp
 
     @colToComp.setter
-    def colToComp(self,v):
+    def colToComp(self, v):
         self._colToComp = v
         if v is not None:
             self.nConcs = np.shape(v)[1]
@@ -831,26 +868,26 @@ class bindingModel():
             return self._specConcs
         else:
             raise ValueError("Data or mapping not available, unable to generate species concentrations.")
-    
+
     @specConcs.setter
-    def specConcs(self,v):
+    def specConcs(self, v):
         self._specConcs = v
-    
+
     @property
     def compConcs(self):
         if self._compConcs is not None:
             return self._compConcs
-        elif  (self.rawData is not None) and (self.colToComp is not None):
-            self._compConcs = np.dot(self.rawData[:,:self.nConcs],self.colToComp.T)  # [Htot, Gtot]
+        elif (self.rawData is not None) and (self.colToComp is not None):
+            self._compConcs = np.dot(self.rawData[:, : self.nConcs], self.colToComp.T)  # [Htot, Gtot]
             return self._compConcs
         else:
             raise ValueError("Data or mapping not available, unable to generate component concentrations.")
 
     @compConcs.setter
-    def compConcs(self,v):
+    def compConcs(self, v):
         self._compConcs = v
 
-    def genSpecConcs(self,data=None,colToSpec=None):
+    def genSpecConcs(self, data=None, colToSpec=None):
         if (data is None and self.rawData is None) or (self.colToSpec is None and colToSpec is None):
             raise ValueError("No data and/or column-to-species mapping stored. Doing nothing")
         else:
@@ -859,18 +896,17 @@ class bindingModel():
             if colToSpec is not None:
                 self.colToSpec = colToSpec
 
-            self.specConcs=np.dot(self.rawData,self.colToSpec.T)
+            self.specConcs = np.dot(self.rawData, self.colToSpec.T)
 
-    def setColumnToSpeciesMapping(self,colToSpec):
-        self.colToSpec=colToSpec
+    def setColumnToSpeciesMapping(self, colToSpec):
+        self.colToSpec = colToSpec
 
-    
     def prepModel(self):
         for paramName in self.compNames:
-            self._addParam('log'+paramName,init=0,vary=False)
+            self._addParam("log" + paramName, init=0, vary=False)
 
-        for paramName in self.plist[self.nComp:]:
-            self._addParam('log'+paramName)
+        for paramName in self.plist[self.nComp :]:
+            self._addParam("log" + paramName)
 
         # Register UV-vis / fluorescence parameters from specToLinear (object array).
         # Done before the analytical-mode branch so params are available in both paths.
@@ -889,7 +925,7 @@ class bindingModel():
                 pname_list = [f"delta0_{token}"]
                 self._addParam(pname_list[0], init=0.0, min=-1000, max=1000, vary=True)
                 for cidx in range(n_complex):
-                    pname = f"deltac{cidx+1}_{token}"
+                    pname = f"deltac{cidx + 1}_{token}"
                     pname_list.append(pname)
                     self._addParam(pname, init=0.0, min=-1000, max=1000, vary=True)
                 self.analytical_obs_param_map.append(pname_list)
@@ -898,89 +934,86 @@ class bindingModel():
 
         # add chemical shift fitting params
         if self.specToDd is not None:
-            for ii,x in np.ndenumerate(self.specToDd):
-                if isinstance(x,tuple):
-                    self._addParam('shift_{}_{}'.format(ii[0],ii[1]),x[1],min=x[0],max=x[2])
-                elif isinstance(x,lmfit.Parameter):
+            for ii, x in np.ndenumerate(self.specToDd):
+                if isinstance(x, tuple):
+                    self._addParam("shift_{}_{}".format(ii[0], ii[1]), x[1], min=x[0], max=x[2])
+                elif isinstance(x, lmfit.Parameter):
                     self._addExistingParam(x)
 
-
-
-    def runModel(self,sigma=1,skip_col=1,method='least_squares',ret=False,kwargs={}) -> Optional['bindingModel']:
+    def runModel(self, sigma=1, skip_col=1, method="least_squares", ret=False, kwargs={}) -> Optional["bindingModel"]:
 
         exptData = np.copy(self.rawData)
         spec_to_integ = None
         if isinstance(self.colToSpec, np.ndarray) and self.colToSpec.ndim == 2 and self.colToSpec.size > 0:
             spec_to_integ = self.colToSpec[:, skip_col:]
-        
 
         analytical_mode = bool(self.analytical_fast_exchange)
 
         # if chemical shifts mappings not provided, then don't try to fit the chemical shifts
         if analytical_mode:
-            exptData = exptData[:,skip_col:]
+            exptData = exptData[:, skip_col:]
         elif self.specToDd is None and self.specToLinear is None:
-            exptData = exptData[:,skip_col:]
+            exptData = exptData[:, skip_col:]
             if spec_to_integ is None:
                 raise ValueError("specToInteg mapping is required when specToDd and specToLinear are not provided.")
-            exptData = exptData[:,:np.shape(spec_to_integ)[1]]
+            exptData = exptData[:, : np.shape(spec_to_integ)[1]]
         else:
-            exptData = exptData[:,skip_col:]
+            exptData = exptData[:, skip_col:]
 
-        fcn_opts = {'compConcs': self.compConcs,
-                    'eqMat': self.eqMat,
-                    'optTarget': 'obs',    # or concs
-                    #'specConcs': None,#specConcs,
-                    'exptData': exptData,
-                    'specToInteg': spec_to_integ,
-                    'specToDd': self.specToDd,
-                    'specToLinear': self.specToLinear,
-                    'sigma': sigma,
-                    'nK': np.shape(self.eqMat)[1],
-                    'ret': 'residual',
-                    'mcmc': False,
-                    'paramNames': list(self.params.keys()),
-                    'analytical_fast_exchange': analytical_mode,
-                    'analytical_topology': self.analytical_topology,
-                    'analytical_obs_columns': list(self.analytical_obs_columns),
-                    'analytical_obs_components': list(self.analytical_obs_components),
-                    'analytical_complex_indices': list(self.analytical_complex_indices),
-                    'analytical_obs_param_map': [list(x) for x in self.analytical_obs_param_map],
-                    'analytical_linear_obs_param_map': [list(x) for x in self.analytical_linear_obs_param_map],
-                    }
-        
-        #save settings for later plots
+        fcn_opts = {
+            "compConcs": self.compConcs,
+            "eqMat": self.eqMat,
+            "optTarget": "obs",  # or concs
+            #'specConcs': None,#specConcs,
+            "exptData": exptData,
+            "specToInteg": spec_to_integ,
+            "specToDd": self.specToDd,
+            "specToLinear": self.specToLinear,
+            "sigma": sigma,
+            "nK": np.shape(self.eqMat)[1],
+            "ret": "residual",
+            "mcmc": False,
+            "paramNames": list(self.params.keys()),
+            "analytical_fast_exchange": analytical_mode,
+            "analytical_topology": self.analytical_topology,
+            "analytical_obs_columns": list(self.analytical_obs_columns),
+            "analytical_obs_components": list(self.analytical_obs_components),
+            "analytical_complex_indices": list(self.analytical_complex_indices),
+            "analytical_obs_param_map": [list(x) for x in self.analytical_obs_param_map],
+            "analytical_linear_obs_param_map": [list(x) for x in self.analytical_linear_obs_param_map],
+        }
+
+        # save settings for later plots
         self.fcn_opts = fcn_opts
- 
+
         # do minimization, save result
-        self.mini = lmfit.Minimizer(fitfun,self.params,fcn_args=(fcn_opts,),nan_policy='omit')
-        #self.miniResult = self.mini.minimize(method='ampgo')#,verbose=1)
-        #TODO: check effect of x_scale
-        if method == 'least_squares' or method == 'leastsq':
+        self.mini = lmfit.Minimizer(fitfun, self.params, fcn_args=(fcn_opts,), nan_policy="omit")
+        # self.miniResult = self.mini.minimize(method='ampgo')#,verbose=1)
+        # TODO: check effect of x_scale
+        if method == "least_squares" or method == "leastsq":
             # if 'method' not in kwargs:
             #     kwargs['method'] = method
-            if 'xtol' not in kwargs:
-                kwargs['xtol'] = 1e-8
-            self.miniResult = self.mini.minimize(method=method,**kwargs)#,x_scale='jac')#,verbose=1)
+            if "xtol" not in kwargs:
+                kwargs["xtol"] = 1e-8
+            self.miniResult = self.mini.minimize(method=method, **kwargs)  # ,x_scale='jac')#,verbose=1)
         else:
-            if 'xtol' in kwargs:
-                del kwargs['xtol']
-            if 'method' not in kwargs:
+            if "xtol" in kwargs:
+                del kwargs["xtol"]
+            if "method" not in kwargs:
                 # kwargs['method'] = method
                 pass
 
-            self.miniResult = self.mini.minimize(method=method,**kwargs)#,x_scale='jac')#,verbose=1)
+            self.miniResult = self.mini.minimize(method=method, **kwargs)  # ,x_scale='jac')#,verbose=1)
         if ret:
             return self
 
-
-    def calcSpeciation(self,params=None):
+    def calcSpeciation(self, params=None):
         """
         Calculate the speciation based on the current model parameters. If the optimisation has been run, it will use the fitted parameters.
-        
+
         Parameters:
         - params: parameters for the model (optional)
-        
+
         Returns:
         - species concentrations
         """
@@ -990,27 +1023,27 @@ class bindingModel():
             else:
                 params = self.miniResult.params
 
-        fcn_opts = {'eqMat': self.eqMat,
-                    'compConcs': self.compConcs,
-                    'optTarget': 'concs',
-                    'ret': 'concs',
-                    'nK': np.shape(self.eqMat)[1],
-                    'paramNames': list(params.keys()),
-                    'analytical_fast_exchange': bool(self.analytical_fast_exchange),
-                    'analytical_topology': self.analytical_topology,
-                    'analytical_obs_columns': list(self.analytical_obs_columns),
-                    'analytical_obs_components': list(self.analytical_obs_components),
-                    'analytical_complex_indices': list(self.analytical_complex_indices),
-                    'analytical_obs_param_map': [list(x) for x in self.analytical_obs_param_map],
-                    }        
+        fcn_opts = {
+            "eqMat": self.eqMat,
+            "compConcs": self.compConcs,
+            "optTarget": "concs",
+            "ret": "concs",
+            "nK": np.shape(self.eqMat)[1],
+            "paramNames": list(params.keys()),
+            "analytical_fast_exchange": bool(self.analytical_fast_exchange),
+            "analytical_topology": self.analytical_topology,
+            "analytical_obs_columns": list(self.analytical_obs_columns),
+            "analytical_obs_components": list(self.analytical_obs_components),
+            "analytical_complex_indices": list(self.analytical_complex_indices),
+            "analytical_obs_param_map": [list(x) for x in self.analytical_obs_param_map],
+        }
 
         return np.array(fitfun(params, fcn_opts))
 
-
-    def plotSpeciation(self,params=None,xaxisidx=None,xaxisvals=None,specToPlot=None,figname=None):
+    def plotSpeciation(self, params=None, xaxisidx=None, xaxisvals=None, specToPlot=None, figname=None):
         """
         Plot the speciation based on the current model parameters. If the optimisation has been run, it will use the fitted parameters.
-        
+
         Parameters:
         - params: parameters for the model (optional)
         - xaxisidx: which index of compConcs to use for the x-axis (default is to plot the ratio of the second/first columns (i.e. typically G/H))
@@ -1044,39 +1077,43 @@ class bindingModel():
             if specToPlot is not None:
                 # Only plot species specified in specToPlot
                 if species in self.plist:
-                    plt.scatter(xx, specConcs[:, self.plist.index(species)], label=f'[{species}]$_\\text{{free}}$', s=s)
+                    plt.scatter(xx, specConcs[:, self.plist.index(species)], label=f"[{species}]$_\\text{{free}}$", s=s)
                 else:
                     print(f"Species '{species}' not found in the model. Skipping.")
             else:
                 # Plot all species
-                plt.scatter(xx, specConcs[:, i], label=f'[{self.plist[i]}]$_\\text{{free}}$', s=s)
-       
+                plt.scatter(xx, specConcs[:, i], label=f"[{self.plist[i]}]$_\\text{{free}}$", s=s)
+
         # Set x-axis label depending on what is plotted
         if xaxisidx is None and xaxisvals is None:
-            plt.xlabel('Component Concentration Ratio ([G]/[H])$_\\text{tot}$')
+            plt.xlabel("Component Concentration Ratio ([G]/[H])$_\\text{tot}$")
         else:
-            plt.xlabel('Component Concentration (M)' if xaxisidx is None else f'[{self.compNames[xaxisidx]}]$_\\text{{tot}}$ (M)')
-        plt.ylabel('Free species Concentration (M)')
+            plt.xlabel(
+                "Component Concentration (M)"
+                if xaxisidx is None
+                else f"[{self.compNames[xaxisidx]}]$_\\text{{tot}}$ (M)"
+            )
+        plt.ylabel("Free species Concentration (M)")
         plt.legend()
-        plt.title('Speciation')
+        plt.title("Speciation")
         plt.show()
         # Save figure if filename is provided
         if figname is not None:
-            plt.savefig(figname + '.pdf', bbox_inches="tight")
-            plt.savefig(figname + '.png', dpi=1200, bbox_inches="tight")
-        
+            plt.savefig(figname + ".pdf", bbox_inches="tight")
+            plt.savefig(figname + ".png", dpi=1200, bbox_inches="tight")
+
         return plt.gcf()
 
 
-def simulateModel(model,compConcs=None,params=None):
+def simulateModel(model, compConcs=None, params=None):
     """
     Simulate the model with given component concentrations and parameters.
-    
+
     Parameters:
     - model: bindingModel instance
     - compConcs: component concentrations (optional)
     - params: parameters for the model (optional)
-    
+
     Returns:
     - simulated concentrations of species
     """
@@ -1086,69 +1123,80 @@ def simulateModel(model,compConcs=None,params=None):
         params = model.miniResult.params
 
     fcn_opts = model.fcn_opts.copy()
-    fcn_opts['optTarget'] = 'obs'
-    fcn_opts['ret'] = 'concs'
-    fcn_opts['compConcs'] = compConcs
+    fcn_opts["optTarget"] = "obs"
+    fcn_opts["ret"] = "concs"
+    fcn_opts["compConcs"] = compConcs
 
     return np.array(fitfun(params, fcn_opts))
 
-def getCalcData(model,newConcs=None):
+
+def getCalcData(model, newConcs=None):
     # Calculate calcData using fitfun
     fcn_opts = model.fcn_opts.copy()
-    fcn_opts['optTarget'] = 'obs'
-    fcn_opts['ret'] = 'concs'
+    fcn_opts["optTarget"] = "obs"
+    fcn_opts["ret"] = "concs"
     if newConcs is not None:
-        fcn_opts['compConcs'] = newConcs
+        fcn_opts["compConcs"] = newConcs
     calcData = np.array(fitfun(model.miniResult.params, fcn_opts))
     return calcData
 
-def makeFitResidPlot(model,plotMask=None,skip_start=0,skip_end=None,figname=None,xindex=1,xvals=None,xlabel=None,ylabel='Conc. (M)',labels=None):
+
+def makeFitResidPlot(
+    model,
+    plotMask=None,
+    skip_start=0,
+    skip_end=None,
+    figname=None,
+    xindex=1,
+    xvals=None,
+    xlabel=None,
+    ylabel="Conc. (M)",
+    labels=None,
+):
     calcData = getCalcData(model)
     compConcs = model.compConcs.copy()
-    exptData = model.fcn_opts['exptData'].copy()
+    exptData = model.fcn_opts["exptData"].copy()
     if labels is None:
         labels = model.obsList
     # Optionally skip start and end datapoints
     if skip_end is None:
-            compConcs = compConcs[skip_start:,:]
-            exptData = exptData[skip_start:,:]
-            calcData = calcData[skip_start:,:]
+        compConcs = compConcs[skip_start:, :]
+        exptData = exptData[skip_start:, :]
+        calcData = calcData[skip_start:, :]
     else:
-        compConcs = compConcs[skip_start:-skip_end,:]
-        exptData = exptData[skip_start:-skip_end,:]
-        calcData = calcData[skip_start:-skip_end,:]        
-    
+        compConcs = compConcs[skip_start:-skip_end, :]
+        exptData = exptData[skip_start:-skip_end, :]
+        calcData = calcData[skip_start:-skip_end, :]
+
     if plotMask is not None:
-        
-        calcData= calcData[:,plotMask]
-        exptData = exptData[:,plotMask]
+        calcData = calcData[:, plotMask]
+        exptData = exptData[:, plotMask]
 
     if xvals is None:
-        xvals = compConcs[:,xindex]
+        xvals = compConcs[:, xindex]
 
     if xlabel is None:
-        xlabel='[Guest]$_{tot}$ (M)'
+        xlabel = "[Guest]$_{tot}$ (M)"
 
     plt.gcf().clear()
-    sf=1 # fig scale factor from single col
-    ms=10 #marker size
-    fig=plt.subplots(1,2,figsize=(sf*150/22.5,sf*70/22.5))
-    #plt.figure(figsize=(sf*85/22.5,sf*70/22.5))
+    sf = 1  # fig scale factor from single col
+    ms = 10  # marker size
+    fig = plt.subplots(1, 2, figsize=(sf * 150 / 22.5, sf * 70 / 22.5))
+    # plt.figure(figsize=(sf*85/22.5,sf*70/22.5))
     # plt.scatter(compConcs[:,2],(calcSpec[:,3]-specConcs[:,0])/specConcs[:,0])
     # plt.scatter(compConcs[:,2],(calcSpec[:,4]-specConcs[:,1])/specConcs[:,1])
     # plt.scatter(compConcs[:,2],(calcSpec[:,5]-specConcs[:,2])/specConcs[:,2])
 
-    colours = ['r','k','b']
-    points = ['^','s','o']
+    colours = ["r", "k", "b"]
+    points = ["^", "s", "o"]
     plt.subplot(122)
-    for ii in range(0,len(exptData[0])):
-        plt.scatter(xvals,calcData[:,ii]-exptData[:,ii],label=labels[ii],s=ms)
+    for ii in range(0, len(exptData[0])):
+        plt.scatter(xvals, calcData[:, ii] - exptData[:, ii], label=labels[ii], s=ms)
     plt.legend()
 
     # plt.scatter(10e3*compConcs[:,2],10e6*(specConcs[:,0]-specCalc[:,0]),marker=points[0],c=colours[0],label="ZnNc${\cdot}$pyridine",s=ms)
     # plt.scatter(10e3*compConcs[:,2],10e6*(specConcs[:,1]-specCalc[:,1]),marker=points[1],c=colours[1],label="ZnNc${\cdot}$DABCO",s=ms)
     # plt.scatter(10e3*compConcs[:,2],10e6*(specConcs[:,2]-specCalc[:,2]),marker=points[2],c=colours[2],label="ZnNc$_{2}{\cdot}$DABCO",s=ms)
-
 
     plt.legend()
     plt.xlabel(xlabel)
@@ -1162,162 +1210,140 @@ def makeFitResidPlot(model,plotMask=None,skip_start=0,skip_end=None,figname=None
 
     # plt.figure(figsize=(sf*85/22.5,sf*70/22.5))
     plt.subplot(121)
-    for ii in range(0,len(exptData[0])):
-        plt.scatter(xvals,exptData[:,ii],s=ms)
-        plt.plot(xvals,calcData[:,ii],label=labels[ii])
-    #plt.xlim(0,0.07)
-    #plt.legend()
+    for ii in range(0, len(exptData[0])):
+        plt.scatter(xvals, exptData[:, ii], s=ms)
+        plt.plot(xvals, calcData[:, ii], label=labels[ii])
+    # plt.xlim(0,0.07)
+    # plt.legend()
     plt.xlabel(xlabel)
     plt.ylabel(ylabel)
 
-    
     plt.tight_layout()
     if figname is not None:
-        plt.savefig(figname+'.pdf', bbox_inches="tight")
-        plt.savefig(figname+'.png',dpi=1200, bbox_inches="tight")
+        plt.savefig(figname + ".pdf", bbox_inches="tight")
+        plt.savefig(figname + ".png", dpi=1200, bbox_inches="tight")
     plt.show()
 
 
-def saveFitCSV(m,mask,filename,xindex=1,xvals=None,xlabel='[G]_tot (M)',labels=None):
+def saveFitCSV(m, mask, filename, xindex=1, xvals=None, xlabel="[G]_tot (M)", labels=None):
     calcData = getCalcData(m)
     compConcs = m.compConcs.copy()
-    exptData = m.fcn_opts['exptData'].copy()
+    exptData = m.fcn_opts["exptData"].copy()
 
     if labels is None:
         labels = [m.obsList[ii] for ii in mask]
-        
 
     if mask is not None:
-        calcData= calcData[:,mask]
-        exptData = exptData[:,mask]  
+        calcData = calcData[:, mask]
+        exptData = exptData[:, mask]
 
     if xvals is None:
-        xvals = compConcs[:,xindex]
-    
+        xvals = compConcs[:, xindex]
 
+    ydata = np.concatenate((exptData, calcData), axis=1)
+    data = np.concatenate((xvals[:, np.newaxis], ydata), axis=1)
 
-    ydata = np.concatenate((exptData,calcData),axis=1)
-    data = np.concatenate((xvals[:,np.newaxis],ydata),axis=1)
-
-    cols = [xlabel,*['expt '+x for x in labels],*['calc '+x for x in labels]]
+    cols = [xlabel, *["expt " + x for x in labels], *["calc " + x for x in labels]]
     print(cols)
-    dataExport = pd.DataFrame(data,columns=cols)
-    
+    dataExport = pd.DataFrame(data, columns=cols)
 
-    dataExport.to_csv(filename,index=False)
+    dataExport.to_csv(filename, index=False)
 
-@jit(nopython=True,nogil=True,cache=True)
-def calclnprob(r,lnsigma):
-    r= (-0.5*np.sum(
-                    np.divide(r, np.exp(lnsigma))**2 
-                    + np.log(2*np.pi) + 2*lnsigma))
-    
+
+@jit(nopython=True, nogil=True, cache=True)
+def calclnprob(r, lnsigma):
+    r = -0.5 * np.sum(np.divide(r, np.exp(lnsigma)) ** 2 + np.log(2 * np.pi) + 2 * lnsigma)
+
     if math.isnan(r):
-        print('Probability function returned NaN, fudging to -inf.')
+        print("Probability function returned NaN, fudging to -inf.")
         return -np.inf
     return r
 
 
+def log_prob(params, fcn_opts, bounds):
+    # def log_prob(params):
+    lp = log_prior(params, bounds)
 
-def log_prob(params,fcn_opts,bounds):
-#def log_prob(params):
-    lp = log_prior(params,bounds)
-    
     if not np.isfinite(lp):
         return -np.inf
-    
-    mapping = fcn_opts['sigmaMapping']
-    lnsigmaVals = params[-(max(mapping)+1):]
+
+    mapping = fcn_opts["sigmaMapping"]
+    lnsigmaVals = params[-(max(mapping) + 1) :]
     # make lnsigma vector using simparams
     lnsigma = np.array([lnsigmaVals[ii] for ii in mapping])
 
-    pp = np.zeros(len(params)+ np.shape(fcn_opts['compConcs'])[1]) # need extra parameters - for logK=0 - for each component in the eqMat
+    pp = np.zeros(
+        len(params) + np.shape(fcn_opts["compConcs"])[1]
+    )  # need extra parameters - for logK=0 - for each component in the eqMat
 
+    pp[-len(params) :] = params
 
-    pp[-len(params):] = params
-    
-    fcn_opts['ret']='residual'
+    fcn_opts["ret"] = "residual"
     r = np.array(fitfun(pp, fcn_opts))
     if np.isnan(r).any():
         return -np.inf
 
-    #r = -0.5 * ((np.sum(r**2) / np.exp(lnsigma) ) + np.log(2*np.pi) + 2*lnsigma)
+    # r = -0.5 * ((np.sum(r**2) / np.exp(lnsigma) ) + np.log(2*np.pi) + 2*lnsigma)
 
-    rout = calclnprob(r,lnsigma)
+    rout = calclnprob(r, lnsigma)
 
-
-
-   # r = r/np.exp(params[-1])
+    # r = r/np.exp(params[-1])
     return rout
 
-@jit(nopython=True,nogil=True,cache=True)
-def log_prior(val,bounds):
+
+@jit(nopython=True, nogil=True, cache=True)
+def log_prior(val, bounds):
     # if val[-1]<-20 or val[-1] > -2:
-    #     return -np.inf 
+    #     return -np.inf
     for ii in range(len(val)):
-        if not ( bounds[ii][0] < val[ii] < bounds[ii][1] ):
-            return -np.inf     
+        if not (bounds[ii][0] < val[ii] < bounds[ii][1]):
+            return -np.inf
     return 0.0
 
-class ObsType():
-    def __init__(self,name,units=None,value=None,minlim=None,maxlim=None):
+
+class ObsType:
+    def __init__(self, name, units=None, value=None, minlim=None, maxlim=None):
         self.name = name
 
         # TODO use pint for units
 
-
-
-        if name == 'NMRInteg':
+        if name == "NMRInteg":
             if units is None:
-                self.units = 'M'
+                self.units = "M"
             else:
                 self.units = units
 
-            self.param = lmfit.Parameter('lnsigmaNMRInteg',
-                                         value=-8,vary=False,
-                                         min=-11,max=-5)
+            self.param = lmfit.Parameter("lnsigmaNMRInteg", value=-8, vary=False, min=-11, max=-5)
 
-        elif name == 'concMeas':
+        elif name == "concMeas":
             if units is None:
-                self.units = 'M'
+                self.units = "M"
             else:
                 self.units = units
 
-            self.param = lmfit.Parameter('lnsigmaconcMeas',
-                                value=-8,vary=False,
-                                min=-11,max=-5)
+            self.param = lmfit.Parameter("lnsigmaconcMeas", value=-8, vary=False, min=-11, max=-5)
 
-        elif name == 'deltaH':
-            self.units = 'ppm'
+        elif name == "deltaH":
+            self.units = "ppm"
 
-            self.param = lmfit.Parameter('lnsigmadeltaH',
-                                value=-9,vary=False,
-                                min=-13,max=-5)
+            self.param = lmfit.Parameter("lnsigmadeltaH", value=-9, vary=False, min=-13, max=-5)
 
+        elif name == "deltaF":
+            self.units = "ppm"
 
-        elif name == 'deltaF':
-            self.units = 'ppm'
+            self.param = lmfit.Parameter("lnsigmadeltaF", value=-5, vary=False, min=-8, max=-3)
 
-            self.param = lmfit.Parameter('lnsigmadeltaF',
-                                value=-5,vary=False,
-                                min=-8,max=-3)
+        elif name == "absorbance" or name == "uvvis":
+            self.units = units if units is not None else "absorbance"
+            self.param = lmfit.Parameter("lnsigmaUVvis", value=-7, vary=True, min=-11, max=-3)
 
-        elif name == 'absorbance' or name =='uvvis':
-            self.units = units if units is not None else 'absorbance'
-            self.param = lmfit.Parameter('lnsigmaUVvis',
-                                value=-7, vary=True,
-                                min=-11, max=-3)
-
-        elif name == 'fluorescence':
-            self.units = units if units is not None else 'intensity'
-            self.param = lmfit.Parameter('lnsigmaFluorescence',
-                                value=-4, vary=True,
-                                min=-8, max=0)
+        elif name == "fluorescence":
+            self.units = units if units is not None else "intensity"
+            self.param = lmfit.Parameter("lnsigmaFluorescence", value=-4, vary=True, min=-8, max=0)
 
         else:
             self.units = units
-            self.param = lmfit.Parameter('lnsigma'+name)
-
+            self.param = lmfit.Parameter("lnsigma" + name)
 
         if value is not None:
             self.param.value = value
@@ -1335,15 +1361,15 @@ class ObsType():
 
         if self.lnsigma > self.maxlim or self.lnsigma < self.minlim:
             print("lnsigma value out of bounds. Setting to midpoint between limits.")
-            self.lnsigma = (self.maxlim+self.minlim)/2
+            self.lnsigma = (self.maxlim + self.minlim) / 2
             self.param.value = self.lnsigma
-            print("New starting value: ",self.lnsigma)
+            print("New starting value: ", self.lnsigma)
 
 
-# convert a list of colNames (string) to a list of indices corresponding to 
+# convert a list of colNames (string) to a list of indices corresponding to
 # unique sigmas (ints)
 def sigmaMapping(colNames):
-    sc=list(dict.fromkeys(colNames)) # get ordered unique list members
+    sc = list(dict.fromkeys(colNames))  # get ordered unique list members
     ix = []
     for nn in colNames:
         ix.append(sc.index(nn))
@@ -1351,7 +1377,9 @@ def sigmaMapping(colNames):
 
 
 class MCMC:
-    def __init__(self, model: bindingModel, obs: List[ObsType], walkers: int =25, samples: int =5000, variance: float=0.2) -> None:
+    def __init__(
+        self, model: bindingModel, obs: List[ObsType], walkers: int = 25, samples: int = 5000, variance: float = 0.2
+    ) -> None:
         self.model = model
         self.obs = obs
         self.walkers = walkers
@@ -1372,20 +1400,19 @@ class MCMC:
         params = [self.model.params[pp].name for pp in self.model.params if self.model.params[pp].vary]
         ss = [pp.name for pp in self.obs]
         ss = list(dict.fromkeys(ss))
-        ss = ['lnsigma' + x for x in ss]
+        ss = ["lnsigma" + x for x in ss]
         params += ss
         return params
 
-
-    def run(self,ret=False,thin=1,samples=None,pool=None,tqdm_kwargs=None):
+    def run(self, ret=False, thin=1, samples=None, pool=None, tqdm_kwargs=None):
         bm = self.model
         bm.colTypes = self.obs
 
         fcn_opts = bm.fcn_opts or {}
         bm.fcn_opts = fcn_opts
 
-        fcn_opts['sigma'] = 1
-        fcn_opts['ret'] = 'residual'
+        fcn_opts["sigma"] = 1
+        fcn_opts["ret"] = "residual"
 
         colNames = []
 
@@ -1394,9 +1421,9 @@ class MCMC:
             sigmaParams[pp.name] = pp.param
             colNames.append(pp.name)
 
-        fcn_opts['sigmaMapping'] = sigmaMapping(colNames)
-        fcn_opts['mcmc'] = True
-        
+        fcn_opts["sigmaMapping"] = sigmaMapping(colNames)
+        fcn_opts["mcmc"] = True
+
         bounds = []
         optResult = []
         for pp in bm.miniResult.params.keys():
@@ -1422,7 +1449,7 @@ class MCMC:
                 p0[i] = np.clip(p0[i], bounds[:, 0] + 1e-7, bounds[:, 1] - 1e-7)
         if samples is None:
             samples = self.samples
-        
+
         if self.sampler is not None:
             # run from previous state
             p0 = None
@@ -1432,31 +1459,33 @@ class MCMC:
             # overwrite the object's samples record
             self.samples = samples
 
-        if os.name == 'posix' or pool is not None:
+        if os.name == "posix" or pool is not None:
             # running on linux
             logger.debug("Running on linux. Trying to use pool/multiprocessing.")
             p = Pool() if pool is None else nullcontext(pool)
             with p as active_pool:
                 if self.sampler is None:
-                    self.sampler = emcee.EnsembleSampler(self.walkers, ndim, log_prob, args=[bm.fcn_opts, bounds], pool=active_pool)
+                    self.sampler = emcee.EnsembleSampler(
+                        self.walkers, ndim, log_prob, args=[bm.fcn_opts, bounds], pool=active_pool
+                    )
                 else:
                     self.sampler.pool = active_pool
-                self.sampler.run_mcmc(p0, samples, progress=True,progress_kwargs=tqdm_kwargs)
+                self.sampler.run_mcmc(p0, samples, progress=True, progress_kwargs=tqdm_kwargs)
         else:
             if self.sampler is None:
                 self.sampler = emcee.EnsembleSampler(self.walkers, ndim, log_prob, args=[bm.fcn_opts, bounds])
 
-            self.sampler.run_mcmc(p0, samples, progress=True,thin_by=thin)#,skip_initial_state_check=True)
+            self.sampler.run_mcmc(p0, samples, progress=True, thin_by=thin)  # ,skip_initial_state_check=True)
 
         if ret is True:
             return self.sampler, bm
 
-    def plot_chain(self,title=None,fig=None):
+    def plot_chain(self, title=None, fig=None):
         ndim = self.sampler.ndim
         if fig is None:
             fig, axes = plt.subplots(ndim, figsize=(10, 7), sharex=True)
         else:
-            axes = fig.subplots(nrows=ndim,ncols=1,sharex=True)
+            axes = fig.subplots(nrows=ndim, ncols=1, sharex=True)
         samples = self.sampler.get_chain()
         for i in range(ndim):
             ax = axes[i]
@@ -1468,7 +1497,7 @@ class MCMC:
         if title is not None:
             fig.suptitle(title)
 
-    def plot_corner(self,title=None,burnin=None,corner_kwargs={},fig=None):
+    def plot_corner(self, title=None, burnin=None, corner_kwargs={}, fig=None):
         try:
             tau = self.sampler.get_autocorr_time()
         except emcee.autocorr.AutocorrError as e:
@@ -1478,100 +1507,92 @@ class MCMC:
             tau = e.tau
         if burnin is None:
             burnin = int(5 * np.max(tau))
-            logger.info("Burnin set to ",burnin)
-        
-        f= self.make_corner_fig(title=title,burnin=burnin,corner_kwargs=corner_kwargs,fig=fig)
+            logger.info("Burnin set to ", burnin)
+
+        f = self.make_corner_fig(title=title, burnin=burnin, corner_kwargs=corner_kwargs, fig=fig)
         return f
 
-    def make_corner_fig(self,title=None,burnin=None,corner_kwargs={},fig=None):
+    def make_corner_fig(self, title=None, burnin=None, corner_kwargs={}, fig=None):
         samples = self.sampler.get_chain(discard=burnin, flat=True)
         if fig is None:
-            fig=plt.figure()
+            fig = plt.figure()
         if title is not None:
             fig.suptitle(title)
-            fig=corner.corner(samples, labels=self.labels, show_titles=True,fig=fig,**corner_kwargs)
+            fig = corner.corner(samples, labels=self.labels, show_titles=True, fig=fig, **corner_kwargs)
             return fig
         else:
-            fig=corner.corner(samples, labels=self.labels, show_titles=True,fig=fig,**corner_kwargs)
+            fig = corner.corner(samples, labels=self.labels, show_titles=True, fig=fig, **corner_kwargs)
             return fig
-
-      
-
 
     def get_tau(self):
         try:
             tau = self.sampler.get_autocorr_time()
-            print("{:<20s} {:<10s}".format("Param","Tau (steps)"))
-            print('\n'.join(["{:<20s} {:<10f}".format(*x) for x in zip(self.labels,tau)]))
+            print("{:<20s} {:<10s}".format("Param", "Tau (steps)"))
+            print("\n".join(["{:<20s} {:<10f}".format(*x) for x in zip(self.labels, tau)]))
 
         except emcee.autocorr.AutocorrError as e:
-            #print("Warning: Autocorrelation time is likely too short. Check the chain.")
-            print("{:<20s} {:<10s}".format("Param","Tau (steps)"))
-            print('\n'.join(["{:<20s} {:<10f}".format(*x) for x in zip(self.labels,e.tau)]))
-            print("Nsteps this run = ",self.samples)
-            print("Ideal nsteps >= ",int(50*np.max(e.tau)))
+            # print("Warning: Autocorrelation time is likely too short. Check the chain.")
+            print("{:<20s} {:<10s}".format("Param", "Tau (steps)"))
+            print("\n".join(["{:<20s} {:<10f}".format(*x) for x in zip(self.labels, e.tau)]))
+            print("Nsteps this run = ", self.samples)
+            print("Ideal nsteps >= ", int(50 * np.max(e.tau)))
 
-    def save(self,fname=None):
+    def save(self, fname=None):
         #  inspired by the emcee hdf backend
         # could add a thin function here but best to apply in run() above
         if fname is None:
             if self.model.comment is not None:
-                fname = self.model.comment +datetime.datetime.now().strftime("%Y-%m-%d-%H%M%S")+".hdf" 
+                fname = self.model.comment + datetime.datetime.now().strftime("%Y-%m-%d-%H%M%S") + ".hdf"
                 print("Saving model to {}".format(fname))
             else:
                 print("Please provide a filename: mcmc.save(fname='filename.hd5')")
-        
-        with h5py.File(fname,'w') as f:
-            g = f.create_group('mcmc')
-            g.create_dataset('chain',data=self.sampler.backend.chain)
-            g.create_dataset('accepted',data=self.sampler.backend.accepted)
-            g.create_dataset('log_prob',data=self.sampler.backend.log_prob)
+
+        with h5py.File(fname, "w") as f:
+            g = f.create_group("mcmc")
+            g.create_dataset("chain", data=self.sampler.backend.chain)
+            g.create_dataset("accepted", data=self.sampler.backend.accepted)
+            g.create_dataset("log_prob", data=self.sampler.backend.log_prob)
 
             if self.sampler.backend.blobs is not None:
-                g.create_dataset('blobs',data=self.sampler.backend.blobs)
-                g.attrs['has_blobs'] = True
+                g.create_dataset("blobs", data=self.sampler.backend.blobs)
+                g.attrs["has_blobs"] = True
             else:
-                g.attrs['has_blobs'] = False
-            g.attrs['iteration'] = self.sampler.backend.iteration
+                g.attrs["has_blobs"] = False
+            g.attrs["iteration"] = self.sampler.backend.iteration
 
-
-    def load(self,fname):
+    def load(self, fname):
         if self.sampler is None:
             print("Cannot load file, sampler does not exist")
             print("Run a short chain first, then load the data")
             # TODO auto-generate sampler based on file?
 
-        with h5py.File(fname,"r") as f:
-            g = f['mcmc']
-            self.sampler.backend.chain = g['chain'][:]
-            self.sampler.backend.accepted = g['accepted'][:]
-            if g.attrs['has_blobs'] is True:
-                self.sampler.backend.blobs = g['blobs'][:]
-            self.sampler.backend.iteration = g.attrs['iteration']
-            self.sampler.backend.log_prob = g['log_prob'][:]
-        # sampler.backend.random_state = g['random_state'][:]
-            self.sampler.backend.initialized=True
+        with h5py.File(fname, "r") as f:
+            g = f["mcmc"]
+            self.sampler.backend.chain = g["chain"][:]
+            self.sampler.backend.accepted = g["accepted"][:]
+            if g.attrs["has_blobs"] is True:
+                self.sampler.backend.blobs = g["blobs"][:]
+            self.sampler.backend.iteration = g.attrs["iteration"]
+            self.sampler.backend.log_prob = g["log_prob"][:]
+            # sampler.backend.random_state = g['random_state'][:]
+            self.sampler.backend.initialized = True
             self.sampler._previous_state = self.sampler.get_last_sample()
-        
 
 
-        
-
-
-def doMCMC(model,obs,samples=1000,variance=0.1,walkers=10):
+def doMCMC(model, obs, samples=1000, variance=0.1, walkers=10):
     print("Warning: doMCMC() is deprecated. Use the MCMC class and MCMC.run() in future.")
-    mcmcModel = MCMC(model,obs,walkers=walkers,samples=samples,variance=variance)
-    sampler,bm = mcmcModel.run(ret=True)
-    return sampler,bm
+    mcmcModel = MCMC(model, obs, walkers=walkers, samples=samples, variance=variance)
+    sampler, bm = mcmcModel.run(ret=True)
+    return sampler, bm
 
 
-def plotMCMC(sampler,labels):
+def plotMCMC(sampler, labels):
     print("Warning: plotMCMC() is deprecated. Use the MCMC class and MCMC.plot_chains() in future.")
 
     ndim = sampler.ndim
     fig, axes = plt.subplots(ndim, figsize=(10, 7), sharex=True)
     samples = sampler.get_chain()
-    #labels = ["k1","k2","lnsigma"] # TODO programmatically generate
+    # labels = ["k1","k2","lnsigma"] # TODO programmatically generate
     for i in range(ndim):
         ax = axes[i]
         ax.plot(samples[:, :, i], "k", alpha=0.3)
@@ -1582,20 +1603,22 @@ def plotMCMC(sampler,labels):
     axes[-1].set_xlabel("step number")
     plt.show()
 
-def plotCorner(sampler,labels):
+
+def plotCorner(sampler, labels):
     print("Warning: plotCorner() is deprecated. Use the MCMC class and MCMC.plot_corner() in future.")
 
     try:
         tau = sampler.get_autocorr_time()
     except emcee.autocorr.AutocorrError as e:
         print("Warning: Autocorrelation time is likely too short. Check the chain.")
-        tau=e.tau
+        tau = e.tau
 
-    burnin = int(2*np.max(tau))
+    burnin = int(2 * np.max(tau))
     samples = sampler.get_chain(discard=burnin, flat=True)
 
-    corner.corner(samples,labels=labels,show_titles=True)
+    corner.corner(samples, labels=labels, show_titles=True)
     plt.show()
+
 
 def getTau(sampler):
     print("Warning: getTau is deprecated. Use the MCMC class and MCMC.get_tau() in future.")
@@ -1606,32 +1629,34 @@ def getTau(sampler):
     except emcee.autocorr.AutocorrError as e:
         print("Warning: Autocorrelation time is likely too short. Check the chain.")
         print(e.tau)
-    
+
+
 # TODO make this function into a method of bindingModel
-def makeMCMCLabels(model,obs):
+def makeMCMCLabels(model, obs):
     print("Warning: makeMCMCLabels is deprecated. Use the MCMC class and MCMC.labels in future.")
 
     params = []
     for pp in model.params:
-        if (model.params[pp].vary):
+        if model.params[pp].vary:
             params.append(model.params[pp].name)
-
- 
 
     ss = []
     for pp in obs:
-        ss.append(pp.name) # todo - make sure everything (not just name) is the same, if not throw an error
+        ss.append(pp.name)  # todo - make sure everything (not just name) is the same, if not throw an error
 
     ss = list(set(ss))
-    ss = ['lnsigma'+x for x in ss]
+    ss = ["lnsigma" + x for x in ss]
     params += ss
 
-    return(params)
+    return params
 
-def mcmchelper(model,obsList=None,obs_types=None,walkers=25,samples=10000,variance=0.1,thin=500,figName='out.jpg'):
+
+def mcmchelper(
+    model, obsList=None, obs_types=None, walkers=25, samples=10000, variance=0.1, thin=500, figName="out.jpg"
+):
     """
     Helper function to run MCMC on a binding model and plot results.
-    
+
     Parameters:
     - model: The binding model to run MCMC on.
     - obsList: List of observable types.
@@ -1645,16 +1670,18 @@ def mcmchelper(model,obsList=None,obs_types=None,walkers=25,samples=10000,varian
         if obsList is None:
             raise ValueError("Either obsList or obs_types must be provided.")
         # If obs_types is not provided, create it based on obsList
-        obs_types = [ObsType('deltaH')] * len(obsList)
-    
+        obs_types = [ObsType("deltaH")] * len(obsList)
+
     # Create and run the MCMC sampler
     mcmc = MCMC(model, obs_types, walkers=walkers, samples=samples, variance=variance)
     mcmc.run(thin=thin)
-    
+
     # Plot results
     mcmc.plot_chain()
     mcmc.get_tau()
     ff = mcmc.plot_corner()
     ff.savefig(figName, dpi=150)
     return mcmc
-#sampler,bm=doMCMC(c8a,obsc8a)
+
+
+# sampler,bm=doMCMC(c8a,obsc8a)

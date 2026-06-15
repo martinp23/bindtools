@@ -85,9 +85,7 @@ def test_getConcs_1to1_binding():
     guest_totals = componentConcentrations[:, 1]
     non_zero_mask = guest_totals > 1e-10
     if np.sum(non_zero_mask) > 1:
-        assert (
-            complex_concs[-1] > complex_concs[1]
-        ), "Complex concentration should increase with guest"
+        assert complex_concs[-1] > complex_concs[1], "Complex concentration should increase with guest"
 
 
 def test_getConcs_1to1_leastSq():
@@ -138,6 +136,4 @@ def test_getConcs_1to1_leastSq():
     guest_totals = componentConcentrations[:, 1]
     non_zero_mask = guest_totals > 1e-10
     if np.sum(non_zero_mask) > 1:
-        assert (
-            complex_concs[-1] > complex_concs[1]
-        ), "Complex concentration should increase with guest"
+        assert complex_concs[-1] > complex_concs[1], "Complex concentration should increase with guest"
