@@ -91,14 +91,16 @@ def getConcs(eqMat,initComponentConc,logK):
     return spec
 
 def getConcsScipy(eqMat,initComponentConc,logK,alg='L-BFGS-B'):
+    eqMat = eqMat.astype('float64')
     K = 10.0**logK
     guessCompConc = np.zeros(len(initComponentConc)) + np.mean(initComponentConc)
+    guessLogCompConc = np.log(guessCompConc)
 
-    bds = [(0,np.max(initComponentConc)) for _ in range(len(guessCompConc))]
+    bds = [(None, np.log(np.max(initComponentConc))) for _ in range(len(guessLogCompConc))]
     # jac=True says that specObj returns float,arr(n) where arr(n) is the Jacobian
-    res=sp.optimize.minimize(specObj,guessCompConc,jac=True,args=(initComponentConc,eqMat,K),method=alg,bounds=bds,tol=0,options={'gtol': 1e-20})
+    res=sp.optimize.minimize(specObj,guessLogCompConc,jac=True,args=(initComponentConc,eqMat,K),method=alg,bounds=bds,tol=0,options={'gtol': 1e-20})
     
-    compTotCalc,specConc = specCalc(res.x,len(K),eqMat,K)
+    compTotCalc,specConc = specCalc(np.exp(res.x),len(K),eqMat,K)
     return specConc
     
 
@@ -132,7 +134,8 @@ def _specJac(ncomp,eqMat,speciesConc):    # this function calculates the Jacobia
     
     return J
 
-def specObj(conc,initComponentConc,eqMat,K):
+def specObj(logConc,initComponentConc,eqMat,K):
+    conc = np.exp(logConc)
     nspecies = len(K)
     compTotCalc,specConc = specCalc(conc,nspecies,eqMat,K)
     
@@ -140,9 +143,9 @@ def specObj(conc,initComponentConc,eqMat,K):
     residual = initComponentConc - compTotCalc
     obj = np.sum(residual**2)
     
-    # Calculate the Jacobian of the objective function
-    J = _specJac(len(initComponentConc),eqMat,specConc)
-    # Jacobian of objective function: d/dc_i sum((target - calculated)^2) = -2 * sum(J_ij * (target_j - calculated_j))
+    # Calculate the Jacobian of the objective function with respect to logConc
+    J = specJac(conc,initComponentConc,eqMat,K)
+    # Jacobian of objective function: d/dc_j sum((target - calculated)^2) = -2 * sum_i J_ij * (target_i - calculated_i)
     grad = -2.0 * J @ residual
     
     return obj, grad
@@ -156,6 +159,7 @@ def DoNR(eqMat,K,initComponentConc,guessCompConc):
     nspecies = len(K)
     ncomp = len(initComponentConc)
     
+    initComponentConc = np.copy(initComponentConc)
     initComponentConc[initComponentConc<=0] = 1e-20 # avoids numerical errors. Changed to <=0 rather than == 0 because sometimes small negative errors appear which makes
                                                     # the optimisation impossible
     
