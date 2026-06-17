@@ -567,15 +567,29 @@ def fitfun(params, fcn_opts):  # ,eqMat,specConcs,startShifts=None,sigma=1,ret='
 
     bindingParams = np.array([*parvals][: fcn_opts["nK"]], dtype=np.float64)
     error = False
-    specCalc = []
-    for row in fcn_opts["compConcs"]:
-        try:
-            yEq = getConcs(fcn_opts["eqMat"], row, bindingParams)
-        except EquilibriumError as e:
-            yEq = e.val
-            error = True
-        specCalc.append(yEq)  # yEq[4:])
-    specCalc = np.array(specCalc)
+
+    analytical_topology = fcn_opts.get("analytical_topology")
+    if analytical_topology in ("1:1", "1:2", "2:1"):
+        comp_concs = np.array(fcn_opts["compConcs"], dtype=float)
+        complex_indices = [int(x) for x in fcn_opts.get("analytical_complex_indices", [])]
+        specCalc, error = calc_analytical_speciation(
+            comp_concs=comp_concs,
+            eq_mat=np.array(fcn_opts["eqMat"], dtype=float),
+            binding_params=bindingParams,
+            topology=str(analytical_topology),
+            n_comp=int(comp_concs.shape[1]),
+            complex_indices=complex_indices,
+        )
+    else:
+        specCalc = []
+        for row in fcn_opts["compConcs"]:
+            try:
+                yEq = getConcs(fcn_opts["eqMat"], row, bindingParams)
+            except EquilibriumError as e:
+                yEq = e.val
+                error = True
+            specCalc.append(yEq)  # yEq[4:])
+        specCalc = np.array(specCalc)
     # except EquilibriumError as e:
     #     if fcn_opts['ret'] == 'residual':
     #         return 1000
