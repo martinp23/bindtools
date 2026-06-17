@@ -97,7 +97,7 @@ def getConcsScipy(eqMat, initComponentConc, logK, alg="L-BFGS-B"):
     eqMat = eqMat.astype("float64")
     K = 10.0**logK
     guessCompConc = np.zeros(len(initComponentConc)) + np.mean(initComponentConc)
-    guessLogCompConc = np.log(guessCompConc)
+    guessLogCompConc = np.log10(guessCompConc)
 
     bds = [(None, np.log(np.max(initComponentConc))) for _ in range(len(guessLogCompConc))]
     # jac=True says that specObj returns float,arr(n) where arr(n) is the Jacobian
@@ -112,7 +112,7 @@ def getConcsScipy(eqMat, initComponentConc, logK, alg="L-BFGS-B"):
         options={"gtol": 1e-20},
     )
 
-    compTotCalc, specConc = specCalc(np.exp(res.x), len(K), eqMat, K)
+    compTotCalc, specConc = specCalc(10**(res.x), len(K), eqMat, K)
     return specConc
 
 
@@ -150,7 +150,7 @@ def _specJac(ncomp, eqMat, speciesConc):  # this function calculates the Jacobia
 
 
 def specObj(logConc, initComponentConc, eqMat, K):
-    conc = np.exp(logConc)
+    conc = 10**(logConc)
     nspecies = len(K)
     compTotCalc, specConc = specCalc(conc, nspecies, eqMat, K)
 
