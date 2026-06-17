@@ -99,7 +99,7 @@ def getConcsScipy(eqMat, initComponentConc, logK, alg="L-BFGS-B"):
     guessCompConc = np.zeros(len(initComponentConc)) + np.mean(initComponentConc)
     guessLogCompConc = np.log10(guessCompConc)
 
-    bds = [(None, np.log(np.max(initComponentConc))) for _ in range(len(guessLogCompConc))]
+    bds = [(None, np.log10(np.max(initComponentConc))) for _ in range(len(guessLogCompConc))]
     # jac=True says that specObj returns float,arr(n) where arr(n) is the Jacobian
     res = sp.optimize.minimize(
         specObj,
