@@ -228,6 +228,7 @@ def _analytical_obs_param_token(col_name: str) -> str:
     return token
 
 
+@jit(nopython=True, nogil=True, cache=True)
 def _best_real_root(coeffs: np.ndarray, lower: float, upper: float, score_fn) -> float:
     nz = np.where(np.abs(coeffs) > 1e-18)[0]
     if len(nz) == 0:
@@ -244,7 +245,7 @@ def _best_real_root(coeffs: np.ndarray, lower: float, upper: float, score_fn) ->
     best = min(candidates, key=score_fn)
     return float(np.clip(best, lower, upper))
 
-
+@jit(nopython=True, nogil=True, cache=True)
 def _solve_row_11(h_tot: float, g_tot: float, beta11: float) -> tuple[float, float, float]:
     if beta11 <= 0:
         raise ValueError("Binding constant (in natural units) cannot be negative")
@@ -264,7 +265,7 @@ def _solve_row_11(h_tot: float, g_tot: float, beta11: float) -> tuple[float, flo
     )  # [HG] cannot be negative or greater than either total concentration
     return h_tot - hg, g_tot - hg, hg
 
-
+@jit(nopython=True, nogil=True, cache=True)
 def _solve_row_12(h_tot: float, g_tot: float, beta11: float, beta12: float) -> tuple[float, float, float, float]:
     if h_tot <= 0 or g_tot <= 0:
         return max(h_tot, 0.0), max(g_tot, 0.0), 0.0, 0.0
@@ -297,7 +298,7 @@ def _solve_row_12(h_tot: float, g_tot: float, beta11: float, beta12: float) -> t
     hg2 = beta12 * h_free * (g_free**2)
     return max(h_free, 0.0), max(g_free, 0.0), max(hg, 0.0), max(hg2, 0.0)
 
-
+@jit(nopython=True, nogil=True, cache=True)
 def _solve_row_21(h_tot: float, g_tot: float, beta11: float, beta21: float) -> tuple[float, float, float, float]:
     if h_tot <= 0 or g_tot <= 0:
         return max(h_tot, 0.0), max(g_tot, 0.0), 0.0, 0.0
@@ -330,7 +331,7 @@ def _solve_row_21(h_tot: float, g_tot: float, beta11: float, beta21: float) -> t
     h2g = beta21 * (h_free**2) * g_free
     return max(h_free, 0.0), max(g_free, 0.0), max(hg, 0.0), max(h2g, 0.0)
 
-
+@jit(nopython=True, nogil=True, cache=True)
 def calc_analytical_speciation(
     comp_concs: np.ndarray,
     eq_mat: np.ndarray,
