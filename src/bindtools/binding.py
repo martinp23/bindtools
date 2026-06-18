@@ -847,6 +847,36 @@ def concToObservable(specConcs, specToInteg, specToDd, shiftParams, paramNames, 
 #     return sum((specConcs.flatten() - res)**2)
 
 
+def _infer_simple_fast_exchange_topology(eq_mat: np.ndarray, n_comp: int) -> Optional[tuple[str, list[int]]]:
+    if not isinstance(eq_mat, np.ndarray) or eq_mat.ndim != 2:
+        return None
+    if n_comp != 2 or eq_mat.shape[0] != 2 or eq_mat.shape[1] <= n_comp:
+        return None
+
+    bound_indices = list(range(n_comp, eq_mat.shape[1]))
+    sig_to_idx = {}
+    for idx in bound_indices:
+        a = eq_mat[0, idx]
+        b = eq_mat[1, idx]
+        if not np.isfinite(a) or not np.isfinite(b):
+            return None
+        if not np.isclose(a, round(a)) or not np.isclose(b, round(b)):
+            return None
+        sig = (int(round(a)), int(round(b)))
+        if sig in sig_to_idx:
+            return None
+        sig_to_idx[sig] = idx
+
+    sigs = set(sig_to_idx.keys())
+    if len(bound_indices) == 1 and sigs == {(1, 1)}:
+        return "1:1", [sig_to_idx[(1, 1)]]
+    if len(bound_indices) == 2 and sigs == {(1, 1), (1, 2)}:
+        return "1:2", [sig_to_idx[(1, 1)], sig_to_idx[(1, 2)]]
+    if len(bound_indices) == 2 and sigs == {(1, 1), (2, 1)}:
+        return "2:1", [sig_to_idx[(1, 1)], sig_to_idx[(2, 1)]]
+    return None
+
+
 class bindingModel:
     def __init__(
         self,
@@ -966,7 +996,104 @@ class bindingModel:
     def setColumnToSpeciesMapping(self, colToSpec):
         self.colToSpec = colToSpec
 
-    def prepModel(self):
+    def prepModel(self, force_numerical=False):
+        if force_numerical:
+            self.analytical_fast_exchange = False
+            self.analytical_topology = None
+            self.analytical_obs_columns = []
+            self.analytical_obs_components = []
+            self.analytical_complex_indices = []
+            self.analytical_obs_param_map = []
+            self.analytical_linear_obs_columns = []
+            self.analytical_linear_obs_param_map = []
+        else:
+            if not self.analytical_topology:
+                topology_res = _infer_simple_fast_exchange_topology(self.eqMat, len(self.compNames))
+                if topology_res is not None:
+                    self.analytical_topology, self.analytical_complex_indices = topology_res
+
+            if self.analytical_topology in ("1:1", "1:2", "2:1") and not self.analytical_fast_exchange:
+                # 1. Check slow exchange mapping (specToInteg / colToSpec)
+                has_slow_exchange = False
+                if self.colToSpec is not None and self.colToSpec.size > 0:
+                    try:
+                        flat_vals = []
+                        for x in self.colToSpec.flat:
+                            try:
+                                val = float(x)
+                            except (TypeError, ValueError):
+                                val = 0.0
+                            flat_vals.append(val)
+                        flat_arr = np.array(flat_vals)
+                        if np.any(~np.isclose(flat_arr, 0.0)):
+                            has_slow_exchange = True
+                    except Exception:
+                        pass
+
+                # 2. Check types of columns (NMR vs Linear vs Mixed)
+                n_integ = self.colToSpec.shape[1] if (self.colToSpec is not None and self.colToSpec.size > 0) else 0
+                n_linear = self.specToLinear.shape[1] if (self.specToLinear is not None and self.specToLinear.size > 0) else 0
+                n_shift = self.specToDd.shape[1] if (self.specToDd is not None and self.specToDd.size > 0) else 0
+
+                obs_list = self.obsList if self.obsList is not None else []
+                if len(obs_list) < n_integ + n_linear + n_shift:
+                    obs_list = list(obs_list) + [f"obs_{i}" for i in range(len(obs_list), n_integ + n_linear + n_shift)]
+
+                linear_cols = obs_list[n_integ:n_integ + n_linear]
+                shift_cols = obs_list[n_integ + n_linear:n_integ + n_linear + n_shift]
+
+                if not has_slow_exchange and not (n_shift > 0 and n_linear > 0) and (n_shift > 0 or n_linear > 0):
+                    self.analytical_fast_exchange = True
+
+                    if n_linear > 0:
+                        self.analytical_linear_obs_columns = linear_cols
+                        linear_obs_param_map = []
+                        for obs_idx in range(n_linear):
+                            pnames = []
+                            for species_idx in range(self.specToLinear.shape[0]):
+                                cell = self.specToLinear[species_idx, obs_idx]
+                                if isinstance(cell, lmfit.Parameter):
+                                    pnames.append(cell.name)
+                                else:
+                                    pnames.append(None)
+                            linear_obs_param_map.append(pnames)
+                        self.analytical_linear_obs_param_map = linear_obs_param_map
+                        self.analytical_obs_columns = []
+                        self.analytical_obs_components = []
+                    else:
+                        self.analytical_obs_columns = shift_cols
+
+                        def is_nonzero_mapping(cell):
+                            if cell is None:
+                                return False
+                            if isinstance(cell, (int, float)):
+                                return not np.isclose(cell, 0.0)
+                            return True
+
+                        obs_components = []
+                        for obs_idx in range(n_shift):
+                            has_comp0 = False
+                            has_comp1 = False
+                            if self.specToDd is not None and self.specToDd.shape[0] > 1:
+                                has_comp0 = is_nonzero_mapping(self.specToDd[0, obs_idx])
+                                has_comp1 = is_nonzero_mapping(self.specToDd[1, obs_idx])
+
+                            if has_comp0 and not has_comp1:
+                                obs_components.append(0)
+                            elif has_comp1 and not has_comp0:
+                                obs_components.append(1)
+                            else:
+                                col_name = shift_cols[obs_idx] if obs_idx < len(shift_cols) else ""
+                                tokens = [t for t in re.split(r"[^A-Za-z0-9]+", col_name.lower()) if t]
+                                matches = [idx for idx, comp in enumerate(self.compNames) if str(comp).lower() in tokens]
+                                if len(matches) == 1:
+                                    obs_components.append(matches[0])
+                                else:
+                                    obs_components.append(obs_idx % 2)
+                        self.analytical_obs_components = obs_components
+                        self.analytical_linear_obs_columns = []
+                        self.analytical_linear_obs_param_map = []
+
         for paramName in self.compNames:
             self._addParam("log" + paramName, init=0, vary=False)
 

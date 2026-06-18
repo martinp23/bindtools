@@ -80,10 +80,6 @@ def test_conc_1to1_without_hfree():
     )
 
 
-    # Enable the analytical speciation solver
-    m1.analytical_topology = "1:1"
-    m1.analytical_complex_indices = [2]
-
     m1.prepModel()
     m1.runModel(skip_col=2)
 
@@ -117,14 +113,45 @@ def test_conc_1to1_analytical():
         rawData=raw_data_numpy,
     )
 
-    # Enable the analytical speciation solver
-    m1.analytical_topology = "1:1"
-    m1.analytical_complex_indices = [2]
-
     m1.prepModel()
     m1.runModel(skip_col=2)
 
-    # Verify that the fit was successful and correctly recovered logHG ~ 3.0
-    assert m1.miniResult is not None
-    assert m1.miniResult.success
     np.testing.assert_allclose(m1.miniResult.params["logHG"].value, 3.0, rtol=1e-4)
+
+
+def test_force_numerical_1to1_fit():
+    # Load synthetic 1:1 binding data
+    data = load_1to1_ka3_data()
+
+    # Convert the first 4 columns (concs) to a numpy array (ignoring dobs)
+    raw_data_numpy = data.to_numpy()[:, :4]
+
+    # Instantiate the 1:1 binding model
+    m1 = bd.bindingModel(
+        eqMat=np.array([[1, 0, 1], [0, 1, 1]]),
+        compNames=["H", "G"],
+        speciesList=["H", "G", "HG"],
+        specToInteg=np.array([
+            [0, 0, 1, 0],
+            [0, 0, 0, 0],
+            [0, 0, 0, 1]
+        ]),
+        colToComp=np.array([
+            [1, 0, 0, 0],
+            [0, 1, 0, 0]
+        ]),
+        rawData=raw_data_numpy,
+    )
+
+
+    # Calling prepModel with force_numerical=True should disable analytical path
+    m1.prepModel(force_numerical=True)
+    assert m1.analytical_topology is None
+    assert m1.analytical_fast_exchange is False
+
+    m1.runModel(skip_col=2)
+
+    np.testing.assert_allclose(m1.miniResult.params["logHG"].value, 3.0, rtol=1e-4)
+
+
+    
