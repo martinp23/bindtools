@@ -218,16 +218,6 @@ def DoNR(eqMat, K, initComponentConc, guessCompConc):
     )
 
 
-def _analytical_obs_param_token(col_name: str) -> str:
-    token = re.sub(r"[^\w]+", "_", str(col_name))
-    token = re.sub(r"_+", "_", token).strip("_")
-    if not token:
-        token = "obs"
-    if not (token[0].isalpha() or token[0] == "_"):
-        token = f"obs_{token}"
-    return token
-
-
 
 def _solve_cubic_vectorized(a: np.ndarray, b: np.ndarray, c: np.ndarray, d: np.ndarray, lower: np.ndarray, upper: np.ndarray, score_fn_list) -> np.ndarray:
     A = b / a
@@ -437,162 +427,6 @@ def calc_analytical_speciation(
     return spec_calc, error
 
 
-def _analytical_param_value(values: np.ndarray, name_to_idx: dict[str, int], param_name: str) -> float:
-    idx = name_to_idx.get(param_name)
-    if idx is None or idx >= len(values):
-        return 0.0
-    return float(values[idx])
-
-
-def calc_analytical_observables(
-    spec_calc: np.ndarray,
-    comp_concs: np.ndarray,
-    eq_mat: np.ndarray,
-    obs_components: list[int],
-    complex_indices: list[int],
-    shift_param_values: np.ndarray,
-    shift_param_names: list[str],
-    obs_param_map: list[list[str]],
-) -> np.ndarray:
-
-    n_obs = len(obs_components)
-    out = np.zeros((spec_calc.shape[0], n_obs), dtype=float)
-    name_to_idx = {name: i for i, name in enumerate(shift_param_names)}
-
-    for obs_idx in range(n_obs):
-        comp_idx = int(obs_components[obs_idx])
-        denom = comp_concs[:, comp_idx]
-        pnames = obs_param_map[obs_idx]
-        baseline = _analytical_param_value(shift_param_values, name_to_idx, pnames[0])
-        out[:, obs_idx] = baseline
-
-        for cidx, complex_idx in enumerate(complex_indices):
-            if cidx + 1 >= len(pnames):
-                continue
-            amp = _analytical_param_value(shift_param_values, name_to_idx, pnames[cidx + 1])
-            stoich = float(eq_mat[comp_idx, complex_idx])
-            frac = np.zeros_like(denom, dtype=float)
-            np.divide(
-                stoich * spec_calc[:, complex_idx],
-                denom,
-                out=frac,
-                where=np.isfinite(denom) & (np.abs(denom) > 0),
-            )
-            out[:, obs_idx] += amp * frac
-
-    return out
-
-
-def calc_analytical_linear_observables(
-    spec_calc: np.ndarray,
-    linear_param_values: np.ndarray,
-    linear_param_names: list,
-    linear_obs_param_map: list,
-) -> np.ndarray:
-    """Compute concentration-weighted linear observables for the analytical fast-exchange path.
-
-    Used for UV-vis (Beer-Lambert) and fluorescence:  A_i = sum_j eps_{ij} * [species_j].
-
-    Args:
-        spec_calc: species concentrations, shape (n_pts, n_species).
-        linear_param_values: flat array of current non-binding parameter values.
-        linear_param_names: list of param names corresponding to linear_param_values.
-        linear_obs_param_map: list of lists; outer index = observable column, inner index = species.
-            Each inner entry is a param name string or None (dark/silent species).
-
-    Returns:
-        ndarray of shape (n_pts, n_obs).
-    """
-    n_obs = len(linear_obs_param_map)
-    out = np.zeros((spec_calc.shape[0], n_obs), dtype=float)
-    name_to_idx = {name: i for i, name in enumerate(linear_param_names)}
-
-    for obs_idx, pnames in enumerate(linear_obs_param_map):
-        for species_idx, pname in enumerate(pnames):
-            if not pname:
-                continue  # dark / silent species
-            coeff = _analytical_param_value(linear_param_values, name_to_idx, pname)
-            out[:, obs_idx] += coeff * spec_calc[:, species_idx]
-
-    return out
-
-
-def fitfun_analytical_fast_exchange(params, fcn_opts):
-    if isinstance(params, lmfit.parameter.Parameters):
-        parvals = list(params.valuesdict().values())
-    else:
-        parvals = params
-
-    nK = int(fcn_opts["nK"])
-    binding_params = np.array([*parvals][:nK], dtype=np.float64)
-    comp_concs = np.array(fcn_opts["compConcs"], dtype=float)
-    eq_mat = np.array(fcn_opts["eqMat"], dtype=float)
-    topology = str(fcn_opts.get("analytical_topology", ""))
-    complex_indices = [int(x) for x in fcn_opts.get("analytical_complex_indices", [])]
-    obs_components = [int(x) for x in fcn_opts.get("analytical_obs_components", [])]
-    obs_param_map = list(fcn_opts.get("analytical_obs_param_map", []))
-    linear_obs_param_map = list(fcn_opts.get("analytical_linear_obs_param_map", []))
-
-    spec_calc, error = calc_analytical_speciation(
-        comp_concs=comp_concs,
-        eq_mat=eq_mat,
-        binding_params=binding_params,
-        topology=topology,
-        n_comp=int(comp_concs.shape[1]),
-        complex_indices=complex_indices,
-    )
-
-    if fcn_opts["optTarget"] == "concs":
-        if fcn_opts["ret"] == "residual":
-            res = (fcn_opts["exptData"] - spec_calc) / fcn_opts["sigma"]
-            if error and fcn_opts["mcmc"] is True:
-                return np.nan
-            if error:
-                res = res * 10
-            return res
-        if fcn_opts["ret"] == "concs":
-            return spec_calc
-        return -1
-
-    shift_params = np.array([*parvals][nK:], dtype=np.float64)
-    shift_param_names = fcn_opts["paramNames"][nK:]
-
-    # Route to linear (UV-vis / fluorescence) or NMR-shift observable calculation.
-    if linear_obs_param_map:
-        obs_calc = calc_analytical_linear_observables(
-            spec_calc=spec_calc,
-            linear_param_values=shift_params,
-            linear_param_names=shift_param_names,
-            linear_obs_param_map=linear_obs_param_map,
-        )
-    else:
-        obs_calc = calc_analytical_observables(
-            spec_calc=spec_calc,
-            comp_concs=comp_concs,
-            eq_mat=eq_mat,
-            obs_components=obs_components,
-            complex_indices=complex_indices,
-            shift_param_values=shift_params,
-            shift_param_names=shift_param_names,
-            obs_param_map=obs_param_map,
-        )
-
-    if fcn_opts["ret"] == "residual":
-        res = (fcn_opts["exptData"] - obs_calc) / fcn_opts["sigma"]
-        nan_mask = np.isnan(fcn_opts["exptData"])
-        res[nan_mask] = 0
-        if error and fcn_opts["mcmc"] is True:
-            return np.nan
-        if error:
-            res = res * 10
-        if fcn_opts["mcmc"] is True:
-            res = np.nan_to_num(res)
-        return res
-    if fcn_opts["ret"] == "concs":
-        return obs_calc
-    return -1
-
-
 def fitfun(params, fcn_opts):  # ,eqMat,specConcs,startShifts=None,sigma=1,ret='residual'):
 
     # fcn_opts = {'compConcs': compConcs,
@@ -604,12 +438,7 @@ def fitfun(params, fcn_opts):  # ,eqMat,specConcs,startShifts=None,sigma=1,ret='
     #             'sigma': 1,
     #             'ret': 'residual'}
 
-    if fcn_opts.get("analytical_fast_exchange") is True and fcn_opts.get("analytical_topology") in (
-        "1:1",
-        "1:2",
-        "2:1",
-    ):
-        return fitfun_analytical_fast_exchange(params, fcn_opts)
+
 
     if isinstance(params, lmfit.parameter.Parameters):
         parvals = list(params.valuesdict().values())
@@ -924,12 +753,7 @@ class bindingModel:
         self.specToLinear: Optional[np.ndarray] = None  # (n_species, n_obs) object array for UV-vis / fluorescence
         self.analytical_fast_exchange: bool = False
         self.analytical_topology: Optional[str] = None
-        self.analytical_obs_columns: list[str] = []
-        self.analytical_obs_components: list[int] = []
         self.analytical_complex_indices: list[int] = []
-        self.analytical_obs_param_map: list[list[str]] = []
-        self.analytical_linear_obs_columns: list[str] = []
-        self.analytical_linear_obs_param_map: list[list] = []  # per-obs list of param names (or None) in species order
 
         self.params = lmfit.Parameters()
         self.mini = None
@@ -1012,89 +836,7 @@ class bindingModel:
                 if topology_res is not None:
                     self.analytical_topology, self.analytical_complex_indices = topology_res
 
-            if self.analytical_topology in ("1:1", "1:2", "2:1") and not self.analytical_fast_exchange:
-                # 1. Check slow exchange mapping (specToInteg / colToSpec)
-                has_slow_exchange = False
-                if self.colToSpec is not None and self.colToSpec.size > 0:
-                    try:
-                        flat_vals = []
-                        for x in self.colToSpec.flat:
-                            try:
-                                val = float(x)
-                            except (TypeError, ValueError):
-                                val = 0.0
-                            flat_vals.append(val)
-                        flat_arr = np.array(flat_vals)
-                        if np.any(~np.isclose(flat_arr, 0.0)):
-                            has_slow_exchange = True
-                    except Exception:
-                        pass
 
-                # 2. Check types of columns (NMR vs Linear vs Mixed)
-                n_integ = self.colToSpec.shape[1] if (self.colToSpec is not None and self.colToSpec.size > 0) else 0
-                n_linear = self.specToLinear.shape[1] if (self.specToLinear is not None and self.specToLinear.size > 0) else 0
-                n_shift = self.specToDd.shape[1] if (self.specToDd is not None and self.specToDd.size > 0) else 0
-
-                obs_list = self.obsList if self.obsList is not None else []
-                if n_shift == 0:
-                    n_shift = max(0, len(obs_list) - n_integ - n_linear)
-
-                if len(obs_list) < n_integ + n_linear + n_shift:
-                    obs_list = list(obs_list) + [f"obs_{i}" for i in range(len(obs_list), n_integ + n_linear + n_shift)]
-
-                linear_cols = obs_list[n_integ:n_integ + n_linear]
-                shift_cols = obs_list[n_integ + n_linear:n_integ + n_linear + n_shift]
-
-
-                if not has_slow_exchange and not (n_shift > 0 and n_linear > 0) and (n_shift > 0 or n_linear > 0):
-                    self.analytical_fast_exchange = True
-
-                    if n_linear > 0:
-                        self.analytical_linear_obs_columns = linear_cols
-                        linear_obs_param_map = []
-                        for obs_idx in range(n_linear):
-                            pnames = []
-                            for species_idx in range(self.specToLinear.shape[0]):
-                                cell = self.specToLinear[species_idx, obs_idx]
-                                if isinstance(cell, lmfit.Parameter):
-                                    pnames.append(cell.name)
-                                else:
-                                    pnames.append(None)
-                            linear_obs_param_map.append(pnames)
-                        self.analytical_linear_obs_param_map = linear_obs_param_map
-                        self.analytical_obs_columns = []
-                        self.analytical_obs_components = []
-                    else:
-                        self.analytical_obs_columns = shift_cols
-
-                        def is_nonzero_mapping(cell):
-                            if cell is None or (isinstance(cell, float) and np.isnan(cell)):
-                                return False
-                            return True
-
-                        obs_components = []
-                        for obs_idx in range(n_shift):
-                            has_comp0 = False
-                            has_comp1 = False
-                            if self.specToDd is not None and self.specToDd.shape[0] > 1:
-                                has_comp0 = is_nonzero_mapping(self.specToDd[0, obs_idx])
-                                has_comp1 = is_nonzero_mapping(self.specToDd[1, obs_idx])
-
-                            if has_comp0 and not has_comp1:
-                                obs_components.append(0)
-                            elif has_comp1 and not has_comp0:
-                                obs_components.append(1)
-                            else:
-                                col_name = shift_cols[obs_idx] if obs_idx < len(shift_cols) else ""
-                                tokens = [t for t in re.split(r"[^A-Za-z0-9]+", col_name.lower()) if t]
-                                matches = [idx for idx, comp in enumerate(self.compNames) if str(comp).lower() in tokens]
-                                if len(matches) == 1:
-                                    obs_components.append(matches[0])
-                                else:
-                                    obs_components.append(0)
-                        self.analytical_obs_components = obs_components
-                        self.analytical_linear_obs_columns = []
-                        self.analytical_linear_obs_param_map = []
 
         for paramName in self.compNames:
             self._addParam("log" + paramName, init=0, vary=False)
@@ -1109,22 +851,7 @@ class bindingModel:
                 if isinstance(x, lmfit.Parameter):
                     self._addExistingParam(x)
 
-        if self.analytical_fast_exchange:
-            n_complex = len(self.analytical_complex_indices)
-            if n_complex == 0:
-                n_complex = 1
-            self.analytical_obs_param_map = []
-            for col_name in self.analytical_obs_columns:
-                token = _analytical_obs_param_token(col_name)
-                pname_list = [f"delta0_{token}"]
-                self._addParam(pname_list[0], init=0.0, min=-1000, max=1000, vary=True)
-                for cidx in range(n_complex):
-                    pname = f"deltac{cidx + 1}_{token}"
-                    pname_list.append(pname)
-                    self._addParam(pname, init=0.0, min=-1000, max=1000, vary=True)
-                self.analytical_obs_param_map.append(pname_list)
-            # specToLinear params already registered above; no further action needed.
-            return
+
 
         # add chemical shift fitting params
         if self.specToDd is not None:
@@ -1170,11 +897,7 @@ class bindingModel:
             "paramNames": list(self.params.keys()),
             "analytical_fast_exchange": analytical_mode,
             "analytical_topology": self.analytical_topology,
-            "analytical_obs_columns": list(self.analytical_obs_columns),
-            "analytical_obs_components": list(self.analytical_obs_components),
             "analytical_complex_indices": list(self.analytical_complex_indices),
-            "analytical_obs_param_map": [list(x) for x in self.analytical_obs_param_map],
-            "analytical_linear_obs_param_map": [list(x) for x in self.analytical_linear_obs_param_map],
         }
 
         # save settings for later plots
@@ -1226,10 +949,7 @@ class bindingModel:
             "paramNames": list(params.keys()),
             "analytical_fast_exchange": bool(self.analytical_fast_exchange),
             "analytical_topology": self.analytical_topology,
-            "analytical_obs_columns": list(self.analytical_obs_columns),
-            "analytical_obs_components": list(self.analytical_obs_components),
             "analytical_complex_indices": list(self.analytical_complex_indices),
-            "analytical_obs_param_map": [list(x) for x in self.analytical_obs_param_map],
         }
 
         return np.array(fitfun(params, fcn_opts))

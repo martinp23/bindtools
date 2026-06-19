@@ -180,11 +180,19 @@ def test_shift_1to1_analytical():
         rawData=raw_data_numpy,
     )
 
-    # Calling prepModel should automatically set analytical_fast_exchange to True
+    # Provide specToDd for the shift data
+    import lmfit
+    m1.specToDd = np.array([
+        [(0.0, 7.0, 10.0)], # H (free)
+        [None],             # G
+        [(0.0, 8.2, 10.0)], # HG (bound guess)
+    ], dtype=object)
+
+    m1.analytical_fast_exchange = True
+
+    # Calling prepModel will now just process parameters
     m1.prepModel()
-    assert m1.analytical_fast_exchange is True
     assert m1.analytical_topology == "1:1"
-    assert m1.analytical_obs_columns == ["dH"]
 
     # Run the fit using runModel (skip the first 2 columns: H_tot and G_tot)
     m1.runModel(skip_col=2)
@@ -193,8 +201,8 @@ def test_shift_1to1_analytical():
     assert m1.miniResult is not None
     assert m1.miniResult.success
     np.testing.assert_allclose(m1.miniResult.params["logHG"].value, 5.0, rtol=1e-3)
-    np.testing.assert_allclose(m1.miniResult.params["delta0_dH"].value, 7.0, rtol=1e-3)
-    np.testing.assert_allclose(m1.miniResult.params["deltac1_dH"].value, 1.2, rtol=1e-3)
+    np.testing.assert_allclose(m1.miniResult.params["shift_0_0"].value, 7.0, rtol=1e-3)
+    np.testing.assert_allclose(m1.miniResult.params["shift_2_0"].value, 8.2, rtol=1e-3)
 
 
 def test_mcmc_1to1_thinning():
