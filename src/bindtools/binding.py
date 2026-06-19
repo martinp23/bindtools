@@ -1583,6 +1583,7 @@ class MCMC:
         self.variance = variance
         self.sampler = None
         self._labels = None
+        self.thin = 1
 
     @property
     def labels(self):
@@ -1601,6 +1602,7 @@ class MCMC:
         return params
 
     def run(self, ret=False, thin=1, samples=None, pool=None, tqdm_kwargs=None):
+        self.thin = thin
         bm = self.model
         bm.colTypes = self.obs
 
@@ -1755,6 +1757,7 @@ class MCMC:
             else:
                 g.attrs["has_blobs"] = False
             g.attrs["iteration"] = self.sampler.backend.iteration
+            g.attrs["thin"] = getattr(self, "thin", 1)
 
     def load(self, fname):
         if self.sampler is None:
@@ -1770,6 +1773,8 @@ class MCMC:
                 self.sampler.backend.blobs = g["blobs"][:]
             self.sampler.backend.iteration = g.attrs["iteration"]
             self.sampler.backend.log_prob = g["log_prob"][:]
+            if "thin" in g.attrs:
+                self.thin = int(g.attrs["thin"])
             # sampler.backend.random_state = g['random_state'][:]
             self.sampler.backend.initialized = True
             self.sampler._previous_state = self.sampler.get_last_sample()
