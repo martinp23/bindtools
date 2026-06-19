@@ -4,9 +4,6 @@ import numpy as np
 
 # pytest.importorskip("corner")
 
-# Disable Numba JIT compilation for testing BEFORE importing the module
-os.environ["NUMBA_DISABLE_JIT"] = "1"
-
 # Ensure repository root is on sys.path for imports and data access
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir, os.pardir))
 if ROOT not in sys.path:
