@@ -1666,7 +1666,7 @@ class MCMC:
                     )
                 else:
                     self.sampler.pool = active_pool
-                self.sampler.run_mcmc(p0, samples, progress=True, progress_kwargs=tqdm_kwargs)
+                self.sampler.run_mcmc(p0, samples, progress=True, thin_by=thin, progress_kwargs=tqdm_kwargs)
         else:
             if self.sampler is None:
                 self.sampler = emcee.EnsembleSampler(self.walkers, ndim, log_prob, args=[bm.fcn_opts, bounds])

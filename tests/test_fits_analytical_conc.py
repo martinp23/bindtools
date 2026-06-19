@@ -200,6 +200,43 @@ def test_shift_1to1_analytical():
     np.testing.assert_allclose(m1.miniResult.params["deltac1_dH"].value, 1.2, rtol=1e-3)
 
 
+def test_mcmc_1to1_thinning():
+    # Load synthetic 1:1 binding data
+    data = load_1to1_ka3_data()
+    raw_data_numpy = data.to_numpy()[:, :4]
+    raw_data_numpy = np.delete(raw_data_numpy, 2, axis=1)
 
+    # Instantiate the 1:1 binding model
+    m1 = bd.bindingModel(
+        eqMat=np.array([[1, 0, 1], [0, 1, 1]]),
+        compNames=["H", "G"],
+        speciesList=["H", "G", "HG"],
+        specToInteg=np.array([
+            [0, 0, 0],
+            [0, 0, 0],
+            [0, 0, 1]
+        ]),
+        colToComp=np.array([
+            [1, 0, 0],
+            [0, 1, 0]
+        ]),
+        rawData=raw_data_numpy,
+    )
+    m1.prepModel()
+    m1.runModel(skip_col=2)
 
+    # Instantiate ObsType for the observable columns
+    obs = [bd.ObsType("concMeas")]
+
+    # Run MCMC with 10 walkers, 20 samples, and thin=5 (so 20 samples per walker should be retained)
+    mcmc = bd.MCMC(m1, obs, walkers=10, samples=20)
     
+    # Run the MCMC simulation
+    sampler, bm = mcmc.run(ret=True, thin=5)
+    
+    # Verify that the sampler completed the run
+    assert sampler is not None
+    
+    # Verify the thinned chains shape
+    chain = sampler.get_chain()
+    assert chain.shape == (20, 10, 2)
