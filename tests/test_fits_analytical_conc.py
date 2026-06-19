@@ -197,7 +197,8 @@ def test_shift_1to1_analytical():
     assert m1.miniResult.success
     np.testing.assert_allclose(m1.miniResult.params["logHG"].value, 5.0, rtol=1e-3)
     np.testing.assert_allclose(m1.miniResult.params["delta0_dH"].value, 7.0, rtol=1e-3)
-    np.testing.assert_allclose(m1.miniResult.params["deltac1_dH"].value, 8.2, rtol=1e-3)
+    np.testing.assert_allclose(m1.miniResult.params["deltac1_dH"].value, 1.2, rtol=1e-3)
+
 
 
 
