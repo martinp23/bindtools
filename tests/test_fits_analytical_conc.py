@@ -154,4 +154,51 @@ def test_force_numerical_1to1_fit():
     np.testing.assert_allclose(m1.miniResult.params["logHG"].value, 3.0, rtol=1e-4)
 
 
+def test_shift_1to1_analytical():
+    # Generate 1:1 NMR fast-exchange chemical shift data
+    host_tot = np.full(24, 1.0e-3)
+    guest_tot = np.linspace(0.0, 2.2e-3, 24)
+    beta11 = 10**5.0
+    term = host_tot + guest_tot + 1.0 / beta11
+    disc = np.maximum(term**2 - 4.0 * host_tot * guest_tot, 0.0)
+    hg = 0.5 * (term - np.sqrt(disc))
+    frac_h_bound = np.divide(hg, host_tot, out=np.zeros_like(hg), where=host_tot > 0)
+    
+    # delta_h = d0 + amp * frac_h_bound where d0 = 7.0, amp = 1.2
+    # In analytical fast exchange, we fit delta0_dH (free H shift = 7.0) and deltac1_dH (bound HG shift = 8.2)
+    delta_h = 7.0 + 1.2 * frac_h_bound
+    
+    raw_data_numpy = np.column_stack((host_tot, guest_tot, delta_h))
+
+    # Instantiate the 1:1 binding model
+    m1 = bd.bindingModel(
+        eqMat=np.array([[1, 0, 1], [0, 1, 1]]),
+        compNames=["H", "G"],
+        speciesList=["H", "G", "HG"],
+        colToComp=np.array([
+            [1, 0, 0],
+            [0, 1, 0]
+        ]),
+        obsList=["dH"],
+        rawData=raw_data_numpy,
+    )
+
+    # Calling prepModel should automatically set analytical_fast_exchange to True
+    m1.prepModel()
+    assert m1.analytical_fast_exchange is True
+    assert m1.analytical_topology == "1:1"
+    assert m1.analytical_obs_columns == ["dH"]
+
+    # Run the fit using runModel (skip the first 2 columns: H_tot and G_tot)
+    m1.runModel(skip_col=2)
+
+    # Verify that the fit successfully recovered the logHG ~ 5.0 binding constant
+    assert m1.miniResult is not None
+    assert m1.miniResult.success
+    np.testing.assert_allclose(m1.miniResult.params["logHG"].value, 5.0, rtol=1e-3)
+    np.testing.assert_allclose(m1.miniResult.params["delta0_dH"].value, 7.0, rtol=1e-3)
+    np.testing.assert_allclose(m1.miniResult.params["deltac1_dH"].value, 8.2, rtol=1e-3)
+
+
+
     
