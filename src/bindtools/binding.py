@@ -1036,11 +1036,15 @@ class bindingModel:
                 n_shift = self.specToDd.shape[1] if (self.specToDd is not None and self.specToDd.size > 0) else 0
 
                 obs_list = self.obsList if self.obsList is not None else []
+                if n_shift == 0:
+                    n_shift = max(0, len(obs_list) - n_integ - n_linear)
+
                 if len(obs_list) < n_integ + n_linear + n_shift:
                     obs_list = list(obs_list) + [f"obs_{i}" for i in range(len(obs_list), n_integ + n_linear + n_shift)]
 
                 linear_cols = obs_list[n_integ:n_integ + n_linear]
                 shift_cols = obs_list[n_integ + n_linear:n_integ + n_linear + n_shift]
+
 
                 if not has_slow_exchange and not (n_shift > 0 and n_linear > 0) and (n_shift > 0 or n_linear > 0):
                     self.analytical_fast_exchange = True
