@@ -4,7 +4,7 @@ build-backend = "uv_build"
 
 [project]
 name = "bindtools"
-version = "0.2.1"
+version = "0.2.2"
 readme = "README.md"
 classifiers = [
   # How mature is this project? Common values are

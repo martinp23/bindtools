@@ -727,12 +727,12 @@ def concToDelta(concs, specToDd, shiftParams, paramNames):
     specToDdTrial = specToDdTrial.astype(np.float64)
 
     # normalize concs to mol fractions
-    truthMat = np.array(specToDdTrial, dtype=bool)
+    truthMat = ~np.isnan(specToDdTrial)
     shiftCalc = []
     for cc in concs:
         tt = (truthMat.T * cc).T
         moleFracs = tt / tt.sum(axis=0)
-        sc = (moleFracs * specToDdTrial).sum(axis=0)
+        sc = np.nansum(moleFracs * specToDdTrial, axis=0)
         shiftCalc.append(sc)
 
     return shiftCalc
@@ -1068,10 +1068,8 @@ class bindingModel:
                         self.analytical_obs_columns = shift_cols
 
                         def is_nonzero_mapping(cell):
-                            if cell is None:
+                            if cell is None or (isinstance(cell, float) and np.isnan(cell)):
                                 return False
-                            if isinstance(cell, (int, float)):
-                                return not np.isclose(cell, 0.0)
                             return True
 
                         obs_components = []
@@ -1093,7 +1091,7 @@ class bindingModel:
                                 if len(matches) == 1:
                                     obs_components.append(matches[0])
                                 else:
-                                    obs_components.append(obs_idx % 2)
+                                    obs_components.append(0)
                         self.analytical_obs_components = obs_components
                         self.analytical_linear_obs_columns = []
                         self.analytical_linear_obs_param_map = []
