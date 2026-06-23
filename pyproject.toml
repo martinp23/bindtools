@@ -19,12 +19,11 @@ classifiers = [
   # Specify the Python versions you support here.
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
-  "Programming Language :: Python :: 3.14",
 
   "Topic :: Scientific/Engineering :: Chemistry",
   "Topic :: Scientific/Engineering :: Bio-Informatics",
 ]
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.14"
 keywords = ["chemistry", "analytical chemistry", "binding constants", "supramolecular"]
 dependencies = [
     "arviz==0.21.0",
@@ -34,7 +33,7 @@ dependencies = [
     "lmfit==1.3.3",
     "matplotlib==3.10.7",
     "numba>=0.65.1",
-    "numpy>=2.3.4,<2.5",
+    "numpy>=2.3.4",
     "openpyxl>=3.1.5",
     "pandas>=2.3.3",
     "scipy==1.16.3",
