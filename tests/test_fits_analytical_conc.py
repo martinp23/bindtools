@@ -181,7 +181,6 @@ def test_shift_1to1_analytical():
     )
 
     # Provide specToDd for the shift data
-    import lmfit
     m1.specToDd = np.array([
         [(0.0, 7.0, 10.0)], # H (free)
         [None],             # G
