@@ -5,7 +5,6 @@
 import datetime
 import math
 import os
-import re
 from multiprocessing import Pool
 from contextlib import nullcontext
 
