@@ -77,10 +77,22 @@ def _apply_along_axis_0(func1d, arr, out):
 # This function solves the equilibrium concentration problem based on equilibrium constants, adapted
 # from Maeder and co workers: https://doi.org/10.1016/S0922-3487(07)80006-2
 @jit(nopython=True, nogil=True, cache=True)
-def getConcs(eqMat, initComponentConc, logK):
-    # now we give a vector containing the (log) equilibrium constants. Be careful
-    # with sign because these constants are for formation of the complexes
-    # above from the "pure components".
+def getConcs(eqMat: np.ndarray, initComponentConc: np.ndarray, logK: np.ndarray) -> np.ndarray:
+    """Solve equilibrium species concentrations using the Newton-Raphson method.
+
+    Computes equilibrium concentrations of all free components and complex species
+    given the stoichiometry matrix, total component concentrations, and log10 equilibrium constants.
+
+    Args:
+        eqMat: Stoichiometry matrix of shape (n_components, n_species) where element (i, j)
+            defines the stoichiometric coefficient of component i in species j.
+        initComponentConc: 1D array of shape (n_components,) containing total initial concentrations.
+        logK: 1D array of shape (n_species,) containing log10 formation constants. Free components
+            typically have log10(K) = 0.
+
+    Returns:
+        1D array of shape (n_species,) with calculated equilibrium concentrations of all species.
+    """
     K = 10.0**logK
     # make an initial guess. This doesn't need to be good - it should just
     # be nearly-equally bad for all parameters
@@ -92,7 +104,18 @@ def getConcs(eqMat, initComponentConc, logK):
     return spec
 
 
-def getConcsScipy(eqMat, initComponentConc, logK, alg="L-BFGS-B"):
+def getConcsScipy(eqMat: np.ndarray, initComponentConc: np.ndarray, logK: np.ndarray, alg: str = "L-BFGS-B") -> np.ndarray:
+    """Fallback speciation solver using SciPy optimization routines.
+
+    Args:
+        eqMat: Stoichiometry matrix of shape (n_components, n_species).
+        initComponentConc: Initial total component concentrations.
+        logK: Log10 formation equilibrium constants for all species.
+        alg: Minimization algorithm supported by scipy.optimize.minimize (default: 'L-BFGS-B').
+
+    Returns:
+        Calculated species equilibrium concentrations array.
+    """
     eqMat = eqMat.astype("float64")
     K = 10.0**logK
     guessCompConc = np.zeros(len(initComponentConc)) + np.mean(initComponentConc)
