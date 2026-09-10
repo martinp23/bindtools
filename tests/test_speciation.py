@@ -9,7 +9,7 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir, os.par
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from bindtools import binding as bd
+from bindtools.speciation import getConcs, getConcsScipy
 
 
 def one_to_one_setup():
@@ -40,7 +40,7 @@ def test_getConcs_1to1_binding():
     # Test the function for each concentration pair
     results = []
     for i, total_concs in enumerate(componentConcentrations):
-        result = bd.getConcs(equilibriumMatrix, total_concs, logK)
+        result = getConcs(equilibriumMatrix, total_concs, logK)
         results.append(result)
 
         # Basic assertions for each result
@@ -91,7 +91,7 @@ def test_getConcs_1to1_leastSq():
     # Test the function for each concentration pair
     results = []
     for i, total_concs in enumerate(componentConcentrations):
-        result = bd.getConcsScipy(equilibriumMatrix, total_concs, logK)
+        result = getConcsScipy(equilibriumMatrix, total_concs, logK)
         results.append(result)
 
         # Basic assertions for each result

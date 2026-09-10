@@ -9,7 +9,7 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir, os.par
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from bindtools import binding as bd
+import bindtools as bd
 import pandas as pd
 
 def load_1to1_ka3_data():
