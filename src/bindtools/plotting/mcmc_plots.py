@@ -1,11 +1,10 @@
-import matplotlib.pyplot as plt
-import corner
 import emcee
 import numpy as np
 
 
 def plotMCMC(sampler, labels):
     print("Warning: plotMCMC() is deprecated. Use the MCMC class and MCMC.plot_chains() in future.")
+    import matplotlib.pyplot as plt
 
     ndim = sampler.ndim
     fig, axes = plt.subplots(ndim, figsize=(10, 7), sharex=True)
@@ -23,6 +22,8 @@ def plotMCMC(sampler, labels):
 
 def plotCorner(sampler, labels):
     print("Warning: plotCorner() is deprecated. Use the MCMC class and MCMC.plot_corner() in future.")
+    import matplotlib.pyplot as plt
+    import corner
 
     try:
         tau = sampler.get_autocorr_time()
@@ -35,4 +36,3 @@ def plotCorner(sampler, labels):
 
     corner.corner(samples, labels=labels, show_titles=True)
     plt.show()
-

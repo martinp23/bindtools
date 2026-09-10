@@ -1,4 +1,3 @@
-import matplotlib.pyplot as plt
 from bindtools.models.simulation import getCalcData
 
 
@@ -14,6 +13,8 @@ def makeFitResidPlot(
     ylabel="Conc. (M)",
     labels=None,
 ):
+    import matplotlib.pyplot as plt
+
     calcData = getCalcData(model)
     compConcs = model.compConcs.copy()
     exptData = model.fcn_opts["exptData"].copy()
@@ -63,4 +64,3 @@ def makeFitResidPlot(
         plt.savefig(figname + ".pdf", bbox_inches="tight")
         plt.savefig(figname + ".png", dpi=1200, bbox_inches="tight")
     plt.show()
-
