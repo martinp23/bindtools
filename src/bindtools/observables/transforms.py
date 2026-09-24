@@ -46,6 +46,10 @@ def concToLinearObs(
 
     Returns an ndarray of shape (n_pts, n_obs).
     """
+
+    if hasattr(specToLinear, "ndim") and specToLinear.ndim == 1:
+        specToLinear = specToLinear[:, None]
+
     mlen, nlen = np.shape(specToLinear)  # (n_species, n_obs)
     specToLinearTrial = np.copy(specToLinear)
 

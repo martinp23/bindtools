@@ -10,11 +10,12 @@ from bindtools.models.objective import fitfun
 class bindingModel:
     def __init__(
         self,
-        eqMat,
-        compNames,
-        speciesList,
-        specToInteg=None,
-        specToDd=None,
+        eqMat: np.ndarray,
+        compNames: List[str],
+        speciesList: List[str],
+        specToInteg: Optional[np.ndarray|List]=None,
+        specToDd: Optional[List|np.ndarray]=None,
+        specToLinear: Optional[List|np.ndarray]=None,
         colToComp=None,
         obsList=None,
         rawData=None,
@@ -48,7 +49,7 @@ class bindingModel:
 
         self.concUnits = None  # mM #TODO
         self.specToDd = specToDd
-        self.specToLinear: Optional[np.ndarray] = None  # (n_species, n_obs) object array for UV-vis / fluorescence
+        self.specToLinear: Optional[List] = specToLinear  # (n_species, n_obs) object array for UV-vis / fluorescence
         self.analytical_fast_exchange: bool = False
         self.analytical_topology: Optional[str] = None
         self.analytical_complex_indices: list[int] = []
@@ -142,8 +143,30 @@ class bindingModel:
 
         # Register UV-vis / fluorescence parameters from specToLinear (object array).
         if self.specToLinear is not None:
-            for _, x in np.ndenumerate(self.specToLinear):
-                if isinstance(x, lmfit.Parameter):
+            # Coerce list or 1D array to 2D object array safely
+            if not isinstance(self.specToLinear, np.ndarray) or self.specToLinear.dtype != object:
+                raw_list = list(self.specToLinear)
+                if len(raw_list) > 0 and isinstance(raw_list[0], (list, tuple, np.ndarray)):
+                    # Already 2D-like
+                    rows, cols = len(raw_list), len(raw_list[0])
+                    arr = np.empty((rows, cols), dtype=object)
+                    for r in range(rows):
+                        for c in range(cols):
+                            arr[r, c] = raw_list[r][c]
+                else:
+                    # 1D-like -> reshape to (n_species, 1)
+                    arr = np.empty((len(raw_list), 1), dtype=object)
+                    for r, val in enumerate(raw_list):
+                        arr[r, 0] = val
+                self.specToLinear = arr
+            elif self.specToLinear.ndim == 1:
+                self.specToLinear = self.specToLinear[:, None]
+            # Register parameters (supporting both lmfit.Parameter and (min, init, max[, name]) tuples)
+            for ii, x in np.ndenumerate(self.specToLinear):
+                if isinstance(x, tuple):
+                    param_name = x[3] if len(x) > 3 else f"lin_{ii[0]}_{ii[1]}"
+                    self._addParam(param_name, x[1], min=x[0], max=x[2])
+                elif isinstance(x, lmfit.Parameter):
                     self._addExistingParam(x)
 
         # add chemical shift fitting params

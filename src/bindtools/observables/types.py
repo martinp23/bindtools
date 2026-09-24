@@ -43,6 +43,8 @@ class ObsType:
             self.param = lmfit.Parameter("lnsigmaFluorescence", value=-4, vary=True, min=-8, max=0)
 
         else:
+            print("Unknown observable type. Using default units and parameter name.")
+
             self.units = units
             self.param = lmfit.Parameter("lnsigma" + name)
 
