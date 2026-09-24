@@ -27,7 +27,7 @@ classifiers = [
 requires-python = ">=3.12"
 keywords = ["chemistry", "analytical chemistry", "binding constants", "supramolecular"]
 dependencies = [
-    "corner==2.2.3",
+    "corner==2.3.0",
     "emcee==3.1.6",
     "h5py>=3.14.0",
     "latex2mathml>=3.81.0",
