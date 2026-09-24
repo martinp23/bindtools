@@ -150,3 +150,53 @@ class TestAnalyticalVsNumericalSpeciation:
                 n_comp=3,
                 complex_indices=[2],
             )
+
+    def test_tight_binding_stoichiometric_regime(self):
+        """Verify numerical stability and mass balance when K*[H] >> 1 (K=1e8, [H]=10 mM)."""
+        eq_mat = np.array([[1.0, 0.0, 1.0], [0.0, 1.0, 1.0]])
+        h_tot = 10e-3
+        l_tot = np.linspace(0.0, 20.0e-3, 41)
+        comp_concs = np.column_stack([np.full_like(l_tot, h_tot), l_tot])
+        logK_tight = np.array([0.0, 0.0, 8.0])
+
+        spec_ana, err = calc_analytical_speciation(
+            comp_concs=comp_concs,
+            eq_mat=eq_mat,
+            binding_params=logK_tight,
+            topology="1:1",
+            n_comp=2,
+            complex_indices=[2],
+        )
+        assert not err
+        assert np.all(spec_ana >= 0.0)
+        # Mass balance
+        np.testing.assert_allclose(spec_ana[:, 0] + spec_ana[:, 2], h_tot, rtol=1e-8)
+        np.testing.assert_allclose(spec_ana[:, 1] + spec_ana[:, 2], l_tot, rtol=1e-8)
+
+        # Numerical comparison
+        spec_num = np.array([getConcs(eq_mat, row, logK_tight) for row in comp_concs])
+        np.testing.assert_allclose(spec_ana, spec_num, rtol=1e-4, atol=1e-10)
+
+        # At equivalence point ([L] = [H] = 10 mM), nearly all host is bound
+        eq_idx = 20
+        assert spec_ana[eq_idx, 2] > 0.99 * h_tot
+
+    def test_very_weak_binding_regime(self):
+        """Verify solver stability when K*[H] << 1 (K=10 M^-1, [H]=1 mM)."""
+        eq_mat = np.array([[1.0, 0.0, 1.0], [0.0, 1.0, 1.0]])
+        logK_weak = np.array([0.0, 0.0, 1.0])
+        comp_concs = np.column_stack([np.full(21, 1e-3), np.linspace(0, 5e-3, 21)])
+
+        spec_ana, err = calc_analytical_speciation(
+            comp_concs=comp_concs,
+            eq_mat=eq_mat,
+            binding_params=logK_weak,
+            topology="1:1",
+            n_comp=2,
+            complex_indices=[2],
+        )
+        assert not err
+        assert np.all(spec_ana >= 0.0)
+        spec_num = np.array([getConcs(eq_mat, row, logK_weak) for row in comp_concs])
+        np.testing.assert_allclose(spec_ana, spec_num, rtol=1e-5, atol=1e-12)
+

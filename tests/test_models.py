@@ -134,6 +134,70 @@ class TestModelHelpersAndExport:
         calc_data = getCalcData(fitted_1to1_model)
         assert calc_data.shape == (10, 1)
 
+    def test_get_calc_data_with_new_concs(self, fitted_1to1_model):
+        """Verify getCalcData evaluates predictions on a new concentration grid without mutating the model."""
+        n_dense = 25
+        dense_concs = np.column_stack([np.full(n_dense, 1e-3), np.linspace(0, 4e-3, n_dense)])
+        calc_dense = getCalcData(fitted_1to1_model, newConcs=dense_concs)
+        assert calc_dense.shape == (n_dense, 1)
+
+        # Ensure original model concentrations are not mutated
+        assert fitted_1to1_model.compConcs.shape == (10, 2)
+
+        # Analytical check: verify calc_dense matches theoretical [HG]
+        eq_mat = np.array([[1, 0, 1], [0, 1, 1]])
+        logK = np.array([0.0, 0.0, fitted_1to1_model.miniResult.params["logHG"].value])
+        expected_hg = np.array([getConcs(eq_mat, row, logK)[2] for row in dense_concs])
+        np.testing.assert_allclose(calc_dense.ravel(), expected_hg, rtol=1e-3, atol=1e-12)
+
+    def test_fit_incomplete_saturation(self):
+        """Fit a titration that stops well before saturation plateau."""
+        h_tot = 10e-3
+        l_tot = np.linspace(0.0, 2.0e-3, 11)  # only ~16% saturation
+        comp_concs = np.column_stack([np.full_like(l_tot, h_tot), l_tot])
+        eq_mat = np.array([[1, 0, 1], [0, 1, 1]])
+        logK_true = 4.0
+        params = np.array([0.0, 0.0, logK_true])
+        specs = np.array([getConcs(eq_mat, row, params) for row in comp_concs])
+
+        m = bindingModel(
+            eqMat=eq_mat,
+            compNames=["H", "L"],
+            speciesList=["H", "L", "HL"],
+            specToInteg=np.array([[0.0], [0.0], [1.0]]),
+            rawData=specs[:, 2:],
+            compConcs=comp_concs,
+            obsList=["[HL]"],
+        )
+        m.prepModel()
+        m.runModel(skip_col=0, method="least_squares")
+        assert m.miniResult.success
+
+    def test_fit_strided_sparse_data(self):
+        """Verify fitting on sparse downsampled data recovers binding constant."""
+        h_tot = 10e-3
+        l_tot = np.linspace(0.0, 40.0e-3, 51)
+        comp_concs = np.column_stack([np.full_like(l_tot, h_tot), l_tot])
+        eq_mat = np.array([[1, 0, 1], [0, 1, 1]])
+        logK_true = 4.0
+        params = np.array([0.0, 0.0, logK_true])
+        specs = np.array([getConcs(eq_mat, row, params) for row in comp_concs])
+
+        # Subsample every 5th point (11 points total)
+        m_sparse = bindingModel(
+            eqMat=eq_mat,
+            compNames=["H", "L"],
+            speciesList=["H", "L", "HL"],
+            specToInteg=np.array([[0.0], [0.0], [1.0]]),
+            rawData=specs[::5, 2:],
+            compConcs=comp_concs[::5],
+            obsList=["[HL]"],
+        )
+        m_sparse.prepModel()
+        m_sparse.runModel(skip_col=0, method="least_squares")
+        assert m_sparse.miniResult.success
+        np.testing.assert_allclose(m_sparse.miniResult.params["logHL"].value, logK_true, rtol=1e-3)
+
     def test_save_fit_csv(self, fitted_1to1_model):
         with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as tf:
             temp_path = tf.name
@@ -146,3 +210,4 @@ class TestModelHelpersAndExport:
         finally:
             if os.path.exists(temp_path):
                 os.remove(temp_path)
+

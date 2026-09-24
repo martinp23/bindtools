@@ -52,6 +52,16 @@ class TestObsType:
         assert fl.param.name == "lnsigmaFluorescence"
         assert fl.param.vary is True
 
+    def test_absorbance_preset(self):
+        abs_obs = ObsType("absorbance")
+        assert abs_obs.name == "absorbance"
+        assert abs_obs.units == "absorbance"
+        assert abs_obs.param.name == "lnsigmaUVvis"
+        assert abs_obs.param.vary is True
+        assert abs_obs.param.value == -7
+        assert abs_obs.minlim == -11
+        assert abs_obs.maxlim == -3
+
     def test_custom_name_and_value(self):
         custom = ObsType("customSignal", units="AU", value=-6, minlim=-10, maxlim=-2)
         assert custom.units == "AU"

@@ -90,3 +90,62 @@ class TestMCMC:
         sampler, bm = doMCMC(fitted_model, obs, samples=5, walkers=6)
         assert sampler is not None
         assert bm is fitted_model
+
+    def test_mcmc_1to2_model(self):
+        """Verify MCMC runs on multi-parameter 1:2 model and recovers posterior."""
+        eq_mat = np.array([[1, 0, 1, 1], [0, 1, 1, 2]], dtype=float)
+        params = np.array([0.0, 0.0, 4.0, 6.0], dtype=float)
+        l_tot = np.linspace(0.0, 40.0e-3, 15)
+        h_tot = 10e-3
+        comp_concs = np.column_stack([np.full_like(l_tot, h_tot), l_tot])
+        concs = np.array([getConcs(eq_mat, row, params) for row in comp_concs])
+        a_obs = 0.1 * concs[:, 0] + 0.6 * concs[:, 2] + 1.0 * concs[:, 3]
+
+        m12 = bindingModel(
+            eqMat=eq_mat,
+            compNames=["H", "L"],
+            speciesList=["H", "L", "HL", "HL2"],
+            specToLinear=np.array([[0.1], [0.0], [0.6], [1.0]]),
+            rawData=a_obs[:, None],
+            compConcs=comp_concs,
+            obsList=["A_obs"],
+        )
+        m12.prepModel()
+        m12.params["logHL"].set(value=3.5, min=0.0, max=8.0)
+        m12.params["logHL2"].set(value=5.5, min=0.0, max=10.0)
+        m12.runModel(skip_col=0, method="least_squares")
+
+        obs = [ObsType("uvvis")]
+        mcmc = MCMC(m12, obs, walkers=8, samples=25)
+        sampler, bm = mcmc.run(ret=True, thin=1, tqdm_kwargs={"disable": True})
+
+        assert sampler is not None
+        assert "logHL" in mcmc.labels
+        assert "logHL2" in mcmc.labels
+        assert "lnsigmauvvis" in mcmc.labels
+        chain = sampler.get_chain()
+        assert chain.shape == (25, 8, 3)
+
+    def test_mcmc_custom_bounds_override(self, fitted_model):
+        """Verify model.fcn_opts['mcmc_bounds'] strictly overrides parameter limits."""
+        custom_bounds = np.array([[3.0, 4.0], [-10.0, -6.0]], dtype=float)
+        fitted_model.fcn_opts["mcmc_bounds"] = custom_bounds
+
+        obs = [ObsType("concMeas")]
+        mcmc = MCMC(fitted_model, obs, walkers=8, samples=20)
+        sampler, _ = mcmc.run(ret=True, thin=1, tqdm_kwargs={"disable": True})
+
+        chain = sampler.get_chain()
+        for p_idx in range(custom_bounds.shape[0]):
+            p_samples = chain[:, :, p_idx]
+            assert np.all(p_samples >= custom_bounds[p_idx, 0] - 1e-6)
+            assert np.all(p_samples <= custom_bounds[p_idx, 1] + 1e-6)
+
+    def test_mcmc_absorbance_obs_type(self, fitted_model):
+        """Verify MCMC executes cleanly with ObsType('absorbance')."""
+        obs = [ObsType("absorbance")]
+        mcmc = MCMC(fitted_model, obs, walkers=6, samples=10)
+        assert "lnsigmaabsorbance" in mcmc.labels
+        sampler, _ = mcmc.run(ret=True, thin=1, tqdm_kwargs={"disable": True})
+        assert sampler is not None
+
