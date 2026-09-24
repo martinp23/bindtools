@@ -10,12 +10,12 @@ from bindtools.models.objective import fitfun
 class bindingModel:
     def __init__(
         self,
-        eqMat,
-        compNames,
-        speciesList,
-        specToInteg=None,
-        specToDd=None,
-        specToLinear=None,
+        eqMat: np.ndarray,
+        compNames: List[str],
+        speciesList: List[str],
+        specToInteg: Optional[np.ndarray|List]=None,
+        specToDd: Optional[List]=None,
+        specToLinear: Optional[List]=None,
         colToComp=None,
         obsList=None,
         rawData=None,
@@ -49,7 +49,7 @@ class bindingModel:
 
         self.concUnits = None  # mM #TODO
         self.specToDd = specToDd
-        self.specToLinear: Optional[np.ndarray] = specToLinear  # (n_species, n_obs) object array for UV-vis / fluorescence
+        self.specToLinear: Optional[List] = specToLinear  # (n_species, n_obs) object array for UV-vis / fluorescence
         self.analytical_fast_exchange: bool = False
         self.analytical_topology: Optional[str] = None
         self.analytical_complex_indices: list[int] = []
