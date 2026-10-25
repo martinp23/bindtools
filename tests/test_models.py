@@ -211,3 +211,142 @@ class TestModelHelpersAndExport:
             if os.path.exists(temp_path):
                 os.remove(temp_path)
 
+
+class TestNMRFastExchangeFit:
+    """NMR fast exchange fitting tests guided by Binding_Examples.ipynb."""
+
+    def test_1to1_nmr_fast_exchange_fit(self):
+        """Fit noise-free 1:1 NMR fast-exchange data and recover logK and bound chemical shift."""
+        eq_mat = np.array([[1, 0, 1], [0, 1, 1]], dtype=float)
+        comp_names = ["H", "L"]
+        species_list = ["H", "L", "HL"]
+
+        h_tot = 10e-3
+        l_tot = np.linspace(0.0, 40.0e-3, 51)
+        comp_concs = np.column_stack([np.full_like(l_tot, h_tot), l_tot])
+
+        logK_true = 4.0
+        params = np.array([0.0, 0.0, logK_true], dtype=float)
+        concs = np.array([getConcs(eq_mat, row, params) for row in comp_concs])
+
+        # Fast-exchange NMR observable: weighted average chemical shift over host-containing species
+        delta_h_true = 7.0
+        delta_hl_true = 8.5
+        d_obs = (delta_h_true * concs[:, 0] + delta_hl_true * concs[:, 2]) / h_tot
+
+        # Silent guest L is represented by np.nan, bound shift has (min, init, max) bounds
+        spec_to_dd = [delta_h_true, np.nan, (6.5, 7.5, 9.5)]
+
+        model = bindingModel(
+            eqMat=eq_mat,
+            compNames=comp_names,
+            speciesList=species_list,
+            specToDd=spec_to_dd,
+            rawData=d_obs[:, None],
+            compConcs=comp_concs,
+            obsList=["d_obs"],
+        )
+        model.prepModel()
+        model.params["logHL"].set(value=3.0, min=0.0, max=8.0)
+        model.runModel(skip_col=0, method="least_squares")
+
+        assert model.miniResult is not None
+        assert model.miniResult.success
+
+        np.testing.assert_allclose(model.miniResult.params["logHL"].value, logK_true, rtol=1e-3)
+        np.testing.assert_allclose(model.miniResult.params["shift_2_0"].value, delta_hl_true, rtol=1e-3)
+
+        calc_data = getCalcData(model).ravel()
+        np.testing.assert_allclose(calc_data, d_obs, atol=1e-5)
+
+    def test_1to3_nmr_fast_exchange_fit(self):
+        """Fit noise-free 1:3 NMR fast-exchange data from the notebook's model ambiguity section."""
+        eq_mat = np.array([[1, 0, 1, 1, 1], [0, 1, 1, 2, 3]], dtype=float)
+        comp_names = ["H", "L"]
+        species_list = ["H", "L", "HL", "HL2", "HL3"]
+
+        h_tot = 5e-3
+        l_tot = np.linspace(0.0, 35.0e-3, 51)
+        comp_concs = np.column_stack([np.full_like(l_tot, h_tot), l_tot])
+
+        # K_nice = [10e4, 10e8, 10e11] -> logKs = [5.0, 9.0, 12.0]
+        logKs_true = [5.0, 9.0, 12.0]
+        params = np.array([0.0, 0.0, *logKs_true], dtype=float)
+        concs = np.array([getConcs(eq_mat, row, params) for row in comp_concs])
+
+        # Chemical shifts from notebook: ws = [-1.0, 0.0, 3.0, 0.0, 2.0]
+        # Host species have shifts -1.0, 3.0, 0.0, 2.0; free guest L is silent (np.nan)
+        d_obs = (-1.0 * concs[:, 0] + 3.0 * concs[:, 2] + 0.0 * concs[:, 3] + 2.0 * concs[:, 4]) / h_tot
+
+        spec_to_dd = [-1.0, np.nan, (0.0, 2.5, 10.0), (-2.0, 0.5, 10.0), (0.0, 1.5, 10.0)]
+
+        model = bindingModel(
+            eqMat=eq_mat,
+            compNames=comp_names,
+            speciesList=species_list,
+            specToDd=spec_to_dd,
+            rawData=d_obs[:, None],
+            compConcs=comp_concs,
+            obsList=["delta_obs"],
+        )
+        model.prepModel()
+        model.params["logHL"].set(value=4.0, min=0.0, max=8.0)
+        model.params["logHL2"].set(value=8.0, min=0.0, max=22.0)
+        model.params["logHL3"].set(value=11.0, min=0.0, max=22.0)
+        model.runModel(skip_col=0, method="least_squares")
+
+        assert model.miniResult is not None
+        assert model.miniResult.success
+
+        # Verify cumulative constants logBeta
+        np.testing.assert_allclose(model.miniResult.params["logHL"].value, logKs_true[0], rtol=1e-3)
+        np.testing.assert_allclose(model.miniResult.params["logHL2"].value, logKs_true[1], rtol=1e-3)
+        np.testing.assert_allclose(model.miniResult.params["logHL3"].value, logKs_true[2], rtol=1e-3)
+
+        # Verify stepwise binding constants: K11 = 10^5, K12 = 10^4, K13 = 10^3
+        beta11 = 10 ** model.miniResult.params["logHL"].value
+        beta12 = 10 ** model.miniResult.params["logHL2"].value
+        beta13 = 10 ** model.miniResult.params["logHL3"].value
+        np.testing.assert_allclose(beta11, 1e5, rtol=1e-2)
+        np.testing.assert_allclose(beta12 / beta11, 1e4, rtol=1e-2)
+        np.testing.assert_allclose(beta13 / beta12, 1e3, rtol=1e-2)
+
+        # Verify recovered pure chemical shifts
+        np.testing.assert_allclose(model.miniResult.params["shift_2_0"].value, 3.0, rtol=1e-3)
+        np.testing.assert_allclose(model.miniResult.params["shift_3_0"].value, 0.0, atol=1e-3)
+        np.testing.assert_allclose(model.miniResult.params["shift_4_0"].value, 2.0, rtol=1e-3)
+
+        # Verify overall fit
+        calc_data = getCalcData(model).ravel()
+        np.testing.assert_allclose(calc_data, d_obs, atol=1e-5)
+
+    def test_1to3_nmr_fast_exchange_model_ambiguity_vs_1to1(self):
+        """Verify that an under-parameterized 1:1 model cannot fit complex 1:3 NMR fast-exchange data."""
+        eq_mat_13 = np.array([[1, 0, 1, 1, 1], [0, 1, 1, 2, 3]], dtype=float)
+        h_tot = 5e-3
+        l_tot = np.linspace(0.0, 35.0e-3, 51)
+        comp_concs = np.column_stack([np.full_like(l_tot, h_tot), l_tot])
+
+        params_13 = np.array([0.0, 0.0, 5.0, 9.0, 12.0], dtype=float)
+        concs_13 = np.array([getConcs(eq_mat_13, row, params_13) for row in comp_concs])
+        d_obs = (-1.0 * concs_13[:, 0] + 3.0 * concs_13[:, 2] + 0.0 * concs_13[:, 3] + 2.0 * concs_13[:, 4]) / h_tot
+
+        # Fit with 1:1 model
+        model_11 = bindingModel(
+            eqMat=np.array([[1, 0, 1], [0, 1, 1]], dtype=float),
+            compNames=["H", "L"],
+            speciesList=["H", "L", "HL"],
+            specToDd=[-1.0, np.nan, (-5.0, 1.0, 10.0)],
+            rawData=d_obs[:, None],
+            compConcs=comp_concs,
+            obsList=["delta_obs"],
+        )
+        model_11.prepModel()
+        model_11.params["logHL"].set(value=4.0, min=0.0, max=8.0)
+        model_11.runModel(skip_col=0, method="least_squares")
+
+        calc_11 = getCalcData(model_11).ravel()
+        rmse_11 = np.sqrt(np.mean((calc_11 - d_obs) ** 2))
+
+        # 1:1 model fails to capture the multi-step titration curve (RMSE is substantial, ~0.3 ppm)
+        assert rmse_11 > 0.1

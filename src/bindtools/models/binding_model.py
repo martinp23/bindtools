@@ -48,7 +48,7 @@ class bindingModel:
             self.nConcs = np.shape(compConcs)[0]
 
         self.concUnits = None  # mM #TODO
-        self.specToDd = specToDd
+        self.specToDd = specToDd  # (n_species, n_obs) object array for NMR chemical shifts
         self.specToLinear: Optional[List] = specToLinear  # (n_species, n_obs) object array for UV-vis / fluorescence
         self.analytical_fast_exchange: bool = False
         self.analytical_topology: Optional[str] = None
@@ -169,14 +169,32 @@ class bindingModel:
                 elif isinstance(x, lmfit.Parameter):
                     self._addExistingParam(x)
 
-        # add chemical shift fitting params
         if self.specToDd is not None:
+            if not isinstance(self.specToDd, np.ndarray) or self.specToDd.dtype != object:
+                raw_list = list(self.specToDd)
+                if len(raw_list) > 0 and isinstance(raw_list[0], (list, tuple, np.ndarray)):
+                    # Already 2D-like
+                    rows, cols = len(raw_list), len(raw_list[0])
+                    arr = np.empty((rows, cols), dtype=object)
+                    for r in range(rows):
+                        for c in range(cols):
+                            arr[r, c] = raw_list[r][c]
+                else:
+                    # 1D-like -> reshape to (n_species, 1)
+                    arr = np.empty((len(raw_list), 1), dtype=object)
+                    for r, val in enumerate(raw_list):
+                        arr[r, 0] = val
+                self.specToDd = arr
+            elif self.specToDd.ndim == 1:
+                self.specToDd = self.specToDd[:, None]
+
+
             for ii, x in np.ndenumerate(self.specToDd):
                 if isinstance(x, tuple):
                     self._addParam("shift_{}_{}".format(ii[0], ii[1]), x[1], min=x[0], max=x[2])
                 elif isinstance(x, lmfit.Parameter):
                     self._addExistingParam(x)
-
+                
     def runModel(self, sigma=1, skip_col=1, method="least_squares", ret=False, kwargs={}) -> Optional["bindingModel"]:
         exptData = np.copy(self.rawData)
         spec_to_integ = None
