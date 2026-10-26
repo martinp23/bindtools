@@ -3,7 +3,7 @@
 [![PyPI version](https://badge.fury.io/py/bindtools.svg)](https://badge.fury.io/py/bindtools)
 [![Python Version](https://img.shields.io/pypi/pyversions/bindtools.svg)](https://pypi.org/project/bindtools/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23651650.svg)](https://doi.org/10.5281/zenodo.23651650)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23651649.svg)](https://doi.org/10.5281/zenodo.23651649)
 
 
 
